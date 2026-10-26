@@ -848,6 +848,249 @@ $("rep").onclick = async () => {
     anchor.after(box);
   };
 })();
+/* ====== SETTINGS (added) ====== */
+(function(){
+  const root = document.documentElement;
+  const DEF = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' fill='%239aa3af'/%3E%3Ccircle cx='20' cy='15' r='7' fill='white'/%3E%3Cellipse cx='20' cy='36' rx='13' ry='10' fill='white'/%3E%3C/svg%3E";
+  const PUB = SUPABASE_URL + "/storage/v1/object/public/chat-images/";
+  const AKEY = "sc_accounts", TKEY = "sc_theme";
+  const ls = {
+    get(k){ try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set(k, v){ try { localStorage.setItem(k, v); } catch (e) {} }
+  };
+  let adding = false, mtoken = 0, bigImg = null;
+
+  const css = document.createElement("style");
+  css.textContent = `
+:root[data-theme=light]{--bg:#f6f7f9;--card:#fff;--tx:#14181f;--mut:#6b7280;--ac:#0f766e;--bd:#e2e5ea;--them:#e8ebf0;color-scheme:light}
+:root[data-theme=dark]{--bg:#0f1318;--card:#181d24;--tx:#eef1f5;--mut:#9aa3af;--ac:#14a89b;--bd:#2a313b;--them:#232a33;color-scheme:dark}
+#out{display:none!important}
+.srow{display:flex;align-items:center;gap:12px;padding:14px 16px;background:var(--card);border-bottom:1px solid var(--bd);cursor:pointer}
+.srow>span:first-child{flex:1}
+.srow.danger{color:#dc2626;font-weight:600}
+.shead{padding:18px 16px 6px;font-size:13px;font-weight:600;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
+.sw{width:48px;height:28px;border-radius:14px;background:var(--bd);position:relative;flex:none;transition:background .2s}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;transition:left .2s}
+.sw.on{background:var(--ac)}.sw.on::after{left:23px}
+#s-me .pname{text-align:center;font-size:20px;font-weight:700;margin:0 0 4px}
+#s-me .pjoin{text-align:center;margin:0 0 12px}
+#s-me .pchg{display:block;margin:0 auto 18px}`;
+  document.head.appendChild(css);
+
+  /* ---- dark mode ---- */
+  const mq = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+  const savedTheme = ls.get(TKEY);
+  if (savedTheme === "dark" || savedTheme === "light") root.setAttribute("data-theme", savedTheme);
+  const isDark = () => { const t = root.getAttribute("data-theme"); return t ? t === "dark" : !!(mq && mq.matches); };
+  function sync(){
+    const on = isDark();
+    document.querySelectorAll("#sbody .sw").forEach(s => { s.classList.toggle("on", on); s.setAttribute("aria-checked", String(on)); });
+  }
+  function setDark(on){ const t = on ? "dark" : "light"; root.setAttribute("data-theme", t); ls.set(TKEY, t); sync(); }
+  if (mq && mq.addEventListener) mq.addEventListener("change", sync);
+
+  /* ---- screens ---- */
+  const set = document.createElement("div"); set.id = "s-set"; set.className = "screen";
+  set.innerHTML = '<header><button class="ghost" id="sback">‹ Back</button><h1>Settings</h1></header><div id="sbody" style="overflow-y:auto;flex:1"></div>';
+  $("app").appendChild(set);
+  const meScr = document.createElement("div"); meScr.id = "s-me"; meScr.className = "screen";
+  meScr.innerHTML = '<header><button class="ghost" id="mback">‹ Back</button><h1>My profile</h1></header><div class="pad" id="mbody"></div>';
+  $("app").appendChild(meScr);
+
+  const gear = document.createElement("button");
+  gear.type = "button"; gear.className = "ghost"; gear.textContent = "⚙️"; gear.style.fontSize = "22px";
+  gear.setAttribute("aria-label", "Settings");
+  $("out").before(gear);
+  gear.onclick = () => { renderSettings(); show("s-set"); };
+  $("sback").onclick = () => show("s-list");
+  $("mback").onclick = () => { mtoken++; renderSettings(); show("s-set"); };
+
+  function row(text, fn, cls, note){
+    const r = document.createElement("div"); r.className = "srow" + (cls ? " " + cls : "");
+    const s = document.createElement("span"); s.textContent = text; r.appendChild(s);
+    if (note) { const n = document.createElement("span"); n.className = "note"; n.textContent = note; r.appendChild(n); }
+    if (fn) r.onclick = fn; else r.style.cursor = "default";
+    return r;
+  }
+  function head(t){ const d = document.createElement("div"); d.className = "shead"; d.textContent = t; return d; }
+
+  /* ---- saved accounts ---- */
+  const getAccs = () => { try { const a = JSON.parse(ls.get(AKEY) || "[]"); return Array.isArray(a) ? a : []; } catch (e) { return []; } };
+  const putAccs = a => ls.set(AKEY, JSON.stringify(a));
+  function upsert(id, name, s){
+    const a = getAccs(), i = a.findIndex(x => x.id === id);
+    const rec = { id, name, at: s.access_token, rt: s.refresh_token };
+    if (i >= 0) a[i] = rec; else a.push(rec);
+    putAccs(a);
+  }
+  const removeAcc = id => putAccs(getAccs().filter(x => x.id !== id));
+  async function snap(){
+    if (!me) return;
+    try {
+      const { data } = await sb.auth.getSession();
+      if (data && data.session && data.session.user.id === me) upsert(me, myName || "me", data.session);
+    } catch (e) {}
+  }
+  if (sb && sb.auth) sb.auth.onAuthStateChange((ev, s) => {
+    if (s && s.user && me && s.user.id === me && ev !== "SIGNED_OUT") upsert(me, myName || "me", s);
+  });
+
+  function resetState(){
+    peer = null; users = []; blocked = new Set(); seen = new Set();
+    $("msgs").textContent = "";
+    const s = $("search"); s.value = ""; s.dispatchEvent(new Event("input"));
+  }
+
+  async function switchTo(id){
+    const acc = getAccs().find(a => a.id === id); if (!acc) return;
+    await snap();
+    const cur = getAccs().find(a => a.id === me);
+    let r;
+    try { r = await sb.auth.setSession({ access_token: acc.at, refresh_token: acc.rt }); } catch (e) { r = { error: e }; }
+    if (!r || r.error || !r.data || !r.data.session) {
+      if (r && r.error && [400, 401, 403].includes(r.error.status)) removeAcc(id);
+      if (cur) { try { await sb.auth.setSession({ access_token: cur.at, refresh_token: cur.rt }); } catch (e) {} }
+      alert("Could not switch. Check your connection, or log in to that account again.");
+      renderAuth(); if (me) renderSettings();
+      return;
+    }
+    resetState();
+    upsert(id, acc.name, r.data.session);
+    await window.start(r.data.session.user);
+  }
+
+  async function addAccount(){
+    if (getAccs().length >= 5) return alert("You can have up to 5 accounts on this device.");
+    await snap();
+    resetState();
+    adding = true;
+    show("s-auth");
+  }
+
+  function renderAuth(){
+    const pad = document.querySelector("#s-auth .pad"); if (!pad) return;
+    const old = $("accbox"); if (old) old.remove();
+    const a = getAccs(); if (!a.length) return;
+    const box = document.createElement("div"); box.id = "accbox"; box.className = "warn";
+    const t = document.createElement("div"); t.className = "note";
+    t.textContent = adding ? "Adding another account: log in or sign up below, or go back to a saved account." : "Saved accounts on this device:";
+    box.appendChild(t);
+    a.forEach(x => {
+      const b = document.createElement("button"); b.type = "button"; b.textContent = "Continue as " + x.name;
+      b.style.cssText = "width:100%;margin-top:8px"; b.onclick = () => switchTo(x.id);
+      box.appendChild(b);
+    });
+    pad.insertBefore(box, pad.firstChild);
+  }
+
+  const _show = window.show;
+  window.show = function(id){ _show(id); if (id === "s-auth") renderAuth(); };
+
+  const _s = window.start;
+  window.start = async function(u){ await _s(u); adding = false; await snap(); };
+  $("out").addEventListener("click", () => { adding = false; if (me) removeAcc(me); });
+
+  /* ---- settings page ---- */
+  function renderSettings(){
+    const b = $("sbody"); b.textContent = "";
+    const pr = document.createElement("div"); pr.className = "srow";
+    const im = new Image(); im.className = "av"; im.alt = ""; im.src = $("myAvatar").src || DEF;
+    const nm = document.createElement("span"); nm.textContent = myName; nm.style.cssText = "flex:1;font-weight:600";
+    const ch = document.createElement("span"); ch.className = "note"; ch.textContent = "View profile ›";
+    pr.append(im, nm, ch); pr.onclick = openMe;
+    b.appendChild(pr);
+
+    b.appendChild(head("Appearance"));
+    const dm = row("Dark mode", () => setDark(!isDark()));
+    const sw = document.createElement("div"); sw.className = "sw"; sw.setAttribute("role", "switch");
+    dm.appendChild(sw); b.appendChild(dm);
+
+    b.appendChild(head("Accounts"));
+    let list = getAccs();
+    if (me && !list.some(a => a.id === me)) list = [{ id: me, name: myName }].concat(list);
+    list.forEach(a => {
+      const cur = a.id === me;
+      b.appendChild(row(a.name, cur ? null : () => switchTo(a.id), "", cur ? "✓ Current" : "Switch ›"));
+    });
+    b.appendChild(row("Add another account", addAccount, "", "+"));
+
+    b.appendChild(head("More"));
+    b.appendChild(row("Share app with friends", shareApp, "", "›"));
+    b.appendChild(row("Log out", () => $("out").click()));
+    b.appendChild(head("Danger zone"));
+    b.appendChild(row("Delete my account", delAccount, "danger"));
+    sync();
+  }
+
+  async function shareApp(){
+    const url = location.href.split("#")[0].split("?")[0].replace(/index\.html$/, "");
+    const text = "Join me on SafeChat, a private chat app. No email or phone needed.";
+    if (navigator.share) {
+      try { await navigator.share({ title: "SafeChat", text, url }); return; }
+      catch (e) { if (e && e.name === "AbortError") return; }
+    }
+    try { await navigator.clipboard.writeText(url); alert("Link copied. Paste it to a friend."); }
+    catch (e) { prompt("Copy this link and send it to a friend:", url); }
+  }
+
+  async function delAccount(){
+    const t = prompt("This permanently deletes your account and all your messages (for everyone), pictures and voice notes. It cannot be undone.\n\nType DELETE to confirm:");
+    if (t === null) return;
+    if (t.trim() !== "DELETE") return alert("Nothing was deleted. You must type DELETE exactly.");
+    const uid = me;
+    const { error } = await sb.rpc("delete_my_account");
+    if (error) return alert("Could not delete your account: " + error.message);
+    for (const bucket of ["avatars", "chat-images", "chat-audio"]) {
+      try {
+        const { data } = await sb.storage.from(bucket).list(uid, { limit: 1000 });
+        const paths = (data || []).filter(f => f.name).map(f => uid + "/" + f.name);
+        if (paths.length) await sb.storage.from(bucket).remove(paths);
+      } catch (e) {}
+    }
+    removeAcc(uid);
+    alert("Your account has been deleted.");
+    $("out").click();
+  }
+
+  /* ---- my profile ---- */
+  function viewImg(url){
+    const vw = $("viewer"), im = vw && vw.querySelector("img");
+    if (!im) return window.open(url, "_blank", "noopener");
+    im.src = url; vw.classList.add("on");
+  }
+  $("myAvatar").addEventListener("load", () => { if (bigImg && bigImg.isConnected) bigImg.src = $("myAvatar").src; });
+
+  async function openMe(){
+    const t = ++mtoken;
+    const body = $("mbody"); body.textContent = "";
+    const big = new Image(); big.className = "pbig"; big.alt = ""; big.src = $("myAvatar").src || DEF;
+    bigImg = big; big.onclick = () => $("avatarInput").click();
+    const nm = document.createElement("div"); nm.className = "pname"; nm.textContent = myName;
+    const jn = document.createElement("div"); jn.className = "note pjoin";
+    const chg = document.createElement("button"); chg.className = "pchg"; chg.textContent = "Change photo";
+    chg.onclick = () => $("avatarInput").click();
+    const cnt = document.createElement("div"); cnt.className = "note"; cnt.style.margin = "0 0 8px"; cnt.textContent = "Loading…";
+    const grid = document.createElement("div"); grid.className = "pgrid";
+    body.append(big, nm, jn, chg, cnt, grid);
+    show("s-me");
+    try {
+      const { data: ss } = await sb.auth.getSession();
+      const cu = ss && ss.session && ss.session.user;
+      if (t === mtoken && cu && cu.created_at) jn.textContent = "Joined " + new Date(cu.created_at).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+      const { data } = await sb.from("messages").select("id,image_url")
+        .eq("sender_id", me).not("image_url", "is", null).is("deleted_at", null)
+        .order("created_at", { ascending: false }).limit(200);
+      if (t !== mtoken) return;
+      const imgs = (data || []).filter(m => m.image_url && m.image_url.startsWith(PUB));
+      cnt.textContent = imgs.length ? "Pictures I've sent (" + imgs.length + ")" : "You haven't sent any pictures yet.";
+      imgs.forEach(m => {
+        const p = new Image(); p.src = m.image_url; p.alt = "Picture"; p.loading = "lazy";
+        p.onclick = () => viewImg(m.image_url);
+        grid.appendChild(p);
+      });
+    } catch (e) { cnt.textContent = "Could not load."; }
+  }
+})();
 
 </script>
 </body>
