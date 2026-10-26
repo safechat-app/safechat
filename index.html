@@ -179,6 +179,62 @@ $("rep").onclick = async () => {
   const { data } = await sb.auth.getSession();
   if (data.session) await start(data.session.user); else show("s-auth");
 })();
+/* ====== PICTURES (added) ====== */
+(function(){
+  const st = document.createElement("style");
+  st.textContent = ".m.pic{padding:4px;background:transparent!important}.m img{display:block;max-width:100%;max-height:320px;border-radius:10px;cursor:pointer}#attach{background:var(--them);color:var(--tx);padding:10px 12px}";
+  document.head.appendChild(st);
+
+  const PUB = SUPABASE_URL + "/storage/v1/object/public/chat-images/";
+  const f = $("f");
+  const at = document.createElement("button");
+  at.type = "button"; at.id = "attach"; at.textContent = "📎"; at.setAttribute("aria-label", "Send a picture");
+  const file = document.createElement("input");
+  file.type = "file"; file.accept = "image/jpeg,image/png,image/webp,image/gif"; file.hidden = true;
+  f.insertBefore(at, $("txt")); f.appendChild(file);
+
+  window.addMsg = function(m){
+    if (seen.has(m.id)) return; seen.add(m.id);
+    const box = $("msgs");
+    const d = document.createElement("div"); d.className = "m" + (m.sender_id === me ? " me" : "");
+    if (m.image_url && m.image_url.startsWith(PUB)) {
+      d.classList.add("pic");
+      const im = document.createElement("img");
+      im.src = m.image_url; im.alt = "Picture"; im.loading = "lazy";
+      im.onload = () => { box.scrollTop = box.scrollHeight; };
+      im.onclick = () => window.open(m.image_url, "_blank", "noopener");
+      d.appendChild(im);
+    } else d.textContent = m.body;
+    box.appendChild(d); box.scrollTop = box.scrollHeight;
+  };
+
+  at.onclick = () => {
+    if (!peer) return;
+    if (blocked.has(peer.id)) return alert("Unblock this user to send messages.");
+    file.click();
+  };
+
+  file.onchange = async () => {
+    const fl = file.files[0]; file.value = "";
+    if (!fl || !peer) return;
+    const exts = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" };
+    if (!exts[fl.type]) return alert("Please choose a JPG, PNG, WebP or GIF picture.");
+    if (fl.size > 5 * 1024 * 1024) return alert("That picture is over 5 MB.");
+    at.disabled = true;
+    try {
+      const path = me + "/" + Date.now() + "-" + Math.random().toString(36).slice(2, 10) + "." + exts[fl.type];
+      const up = await sb.storage.from("chat-images").upload(path, fl, { contentType: fl.type });
+      if (up.error) throw up.error;
+      const url = sb.storage.from("chat-images").getPublicUrl(path).data.publicUrl;
+      const { data, error } = await sb.from("messages")
+        .insert({ sender_id: me, recipient_id: peer.id, body: "[picture]", image_url: url }).select().single();
+      if (error) throw error;
+      addMsg(data);
+    } catch (e) { alert("Picture could not be sent."); }
+    at.disabled = false;
+  };
+})();
+
 </script>
 </body>
 </html>
