@@ -376,6 +376,114 @@ $("rep").onclick = async () => {
   };
   $("out").addEventListener("click", () => { if (ech) { sb.removeChannel(ech); ech = null; } });
 })();
+/* ====== VOICE NOTES (added) ====== */
+(function(){
+  const APUB = SUPABASE_URL + "/storage/v1/object/public/chat-audio/";
+  const MAX_SECS = 120;
+  const css = document.createElement("style");
+  css.textContent = "#mic,#cancelrec{background:var(--them);color:var(--tx);padding:10px 12px}#mic.rec{background:#dc2626;color:#fff}.m.aud{padding:6px}.m audio{display:block;width:240px;max-width:100%;height:40px}.m .rm{background:transparent;color:inherit;font-size:12px;font-weight:400;padding:4px 0 0;opacity:.85;text-decoration:underline}";
+  document.head.appendChild(css);
+
+  const f = $("f");
+  const mic = document.createElement("button");
+  mic.type = "button"; mic.id = "mic"; mic.textContent = "🎤"; mic.setAttribute("aria-label", "Record a voice note");
+  const cancel = document.createElement("button");
+  cancel.type = "button"; cancel.id = "cancelrec"; cancel.textContent = "✕"; cancel.hidden = true; cancel.setAttribute("aria-label", "Cancel recording");
+  f.insertBefore(mic, $("txt")); f.insertBefore(cancel, $("txt"));
+
+  let rec = null, chunks = [], stream = null, t0 = 0, tick = null, cancelled = false, target = null;
+
+  function pickType(){
+    if (!window.MediaRecorder) return "";
+    for (const t of ["audio/mp4", "audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"])
+      if (MediaRecorder.isTypeSupported(t)) return t;
+    return "";
+  }
+  function fmt(ms){ const s = Math.floor(ms / 1000); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); }
+  function ui(on){
+    mic.classList.toggle("rec", on); cancel.hidden = !on;
+    mic.textContent = on ? "⏹ 0:00" : "🎤";
+    $("txt").disabled = on;
+  }
+
+  async function startRec(){
+    if (!peer) return;
+    if (blocked.has(peer.id)) return alert("Unblock this user to send messages.");
+    if (!navigator.mediaDevices || !window.MediaRecorder) return alert("Voice notes are not supported in this browser.");
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch (e) { return alert("Please allow microphone access to record voice notes."); }
+    const type = pickType();
+    try { rec = type ? new MediaRecorder(stream, { mimeType: type }) : new MediaRecorder(stream); }
+    catch (e) { stream.getTracks().forEach(t => t.stop()); return alert("Could not start recording."); }
+    chunks = []; cancelled = false; target = peer;
+    rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+    rec.onstop = onStop;
+    rec.start(); t0 = Date.now(); ui(true);
+    tick = setInterval(() => {
+      const el = Date.now() - t0; mic.textContent = "⏹ " + fmt(el);
+      if (el >= MAX_SECS * 1000) stopRec();
+    }, 250);
+  }
+  function stopRec(){ if (rec && rec.state !== "inactive") rec.stop(); }
+  function cancelRec(){ cancelled = true; stopRec(); }
+
+  async function onStop(){
+    clearInterval(tick); tick = null;
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    ui(false);
+    const el = Date.now() - t0, to = target, parts = chunks, type = (rec && rec.mimeType) || pickType() || "audio/mp4";
+    rec = null; stream = null;
+    if (cancelled || !parts.length || !to) return;
+    if (el < 1000) return alert("That recording was too short.");
+    const base = (type.split(";")[0] || "audio/mp4");
+    const ext = base.includes("mp4") ? "m4a" : base.includes("ogg") ? "ogg" : "webm";
+    const blob = new Blob(parts, { type: base });
+    if (blob.size > 10 * 1024 * 1024) return alert("That voice note is too large.");
+    mic.disabled = true;
+    try {
+      const path = me + "/" + Date.now() + "-" + Math.random().toString(36).slice(2, 10) + "." + ext;
+      const up = await sb.storage.from("chat-audio").upload(path, blob, { contentType: base });
+      if (up.error) throw up.error;
+      const url = sb.storage.from("chat-audio").getPublicUrl(path).data.publicUrl;
+      const { data, error } = await sb.from("messages")
+        .insert({ sender_id: me, recipient_id: to.id, body: "[voice note]", audio_url: url }).select().single();
+      if (error) throw error;
+      if (peer && peer.id === to.id) addMsg(data);
+    } catch (e) { alert("Voice note could not be sent."); }
+    mic.disabled = false;
+  }
+
+  mic.onclick = () => { if (rec && rec.state === "recording") stopRec(); else startRec(); };
+  cancel.onclick = cancelRec;
+  $("back").addEventListener("click", () => { if (rec) cancelRec(); });
+  $("out").addEventListener("click", () => { if (rec) cancelRec(); });
+
+  const _add = window.addMsg;
+  window.addMsg = function(m){
+    _add(m);
+    if (!m.audio_url || m.deleted_at || !m.audio_url.startsWith(APUB)) return;
+    const d = document.querySelector('#msgs [data-id="' + m.id + '"]');
+    if (!d || d.querySelector("audio")) return;
+    d.textContent = ""; d.onclick = null; d.classList.add("aud");
+    const a = document.createElement("audio");
+    a.controls = true; a.preload = "metadata"; a.src = m.audio_url;
+    d.appendChild(a);
+    if (m.sender_id === me) {
+      const x = document.createElement("button");
+      x.type = "button"; x.className = "rm"; x.textContent = "Delete";
+      x.onclick = async () => {
+        if (!confirm("Delete this voice note for everyone?")) return;
+        const { error } = await sb.rpc("delete_message", { msg_id: m.id });
+        if (error) return alert("Could not delete the voice note.");
+        try { await sb.storage.from("chat-audio").remove([m.audio_url.slice(APUB.length)]); } catch (e) {}
+        d.className = "m del me"; d.textContent = "Message deleted";
+      };
+      d.appendChild(x);
+    }
+    const box = $("msgs"); box.scrollTop = box.scrollHeight;
+  };
+})();
+
 
 
 
