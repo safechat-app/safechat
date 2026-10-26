@@ -288,6 +288,95 @@ $("rep").onclick = async () => {
   };
   $("out").addEventListener("click", () => { if (cch) { sb.removeChannel(cch); cch = null; } found = null; s.value = ""; });
 })();
+/* ====== EDIT & DELETE (added) ====== */
+(function(){
+  const PUB = SUPABASE_URL + "/storage/v1/object/public/chat-images/";
+  const css = document.createElement("style");
+  css.textContent = ".m.del{font-style:italic;background:transparent!important;border:1px dashed var(--bd);color:var(--mut)!important}.m small{display:block;font-size:11px;opacity:.7;margin-top:2px}#sheet{position:fixed;inset:0;background:rgba(0,0,0,.4);display:none;align-items:flex-end;justify-content:center;z-index:9}#sheet.on{display:flex}#sheet>div{background:var(--card);width:100%;max-width:520px;padding:12px;border-radius:16px 16px 0 0;display:flex;flex-direction:column;gap:8px;padding-bottom:calc(12px + env(safe-area-inset-bottom,0px))}#sheet button{background:var(--them);color:var(--tx)}#sheet button.danger{background:#dc2626;color:#fff}";
+  document.head.appendChild(css);
+
+  const store = new Map();
+  let ech = null;
+
+  function fill(d, m){
+    d.textContent = ""; d.classList.remove("pic", "del");
+    if (m.deleted_at) { d.classList.add("del"); d.textContent = "Message deleted"; return; }
+    if (m.image_url && m.image_url.startsWith(PUB)) {
+      d.classList.add("pic");
+      const im = document.createElement("img");
+      im.src = m.image_url; im.alt = "Picture"; im.loading = "lazy";
+      im.onload = () => { const b = $("msgs"); b.scrollTop = b.scrollHeight; };
+      im.onclick = () => { if (m.sender_id !== me) window.open(m.image_url, "_blank", "noopener"); };
+      d.appendChild(im);
+    } else d.textContent = m.body;
+    if (m.edited_at) { const s = document.createElement("small"); s.textContent = "edited"; d.appendChild(s); }
+  }
+
+  window.addMsg = function(m){
+    if (seen.has(m.id)) return; seen.add(m.id);
+    const box = $("msgs");
+    const d = document.createElement("div");
+    d.className = "m" + (m.sender_id === me ? " me" : ""); d.dataset.id = m.id;
+    store.set(m.id, m); fill(d, m);
+    if (m.sender_id === me) d.onclick = () => openSheet(Number(d.dataset.id));
+    box.appendChild(d); box.scrollTop = box.scrollHeight;
+  };
+
+  function apply(m){
+    if (!m) return;
+    store.set(m.id, m);
+    const d = document.querySelector('#msgs [data-id="' + m.id + '"]');
+    if (d) fill(d, m);
+  }
+
+  const sheet = document.createElement("div"); sheet.id = "sheet";
+  const panel = document.createElement("div"); sheet.appendChild(panel);
+  document.body.appendChild(sheet);
+  const close = () => sheet.classList.remove("on");
+  sheet.onclick = e => { if (e.target === sheet) close(); };
+  function mk(label, cls, fn){
+    const b = document.createElement("button"); b.type = "button"; b.textContent = label;
+    if (cls) b.className = cls; b.onclick = fn; panel.appendChild(b);
+  }
+  function openSheet(id){
+    const m = store.get(id); if (!m || m.deleted_at) return;
+    panel.textContent = "";
+    if (m.image_url) mk("View picture", "", () => { close(); window.open(m.image_url, "_blank", "noopener"); });
+    else mk("Edit message", "", () => { close(); editMsg(m); });
+    mk("Delete message", "danger", () => { close(); delMsg(m); });
+    mk("Cancel", "", close);
+    sheet.classList.add("on");
+  }
+
+  async function editMsg(m){
+    const t = prompt("Edit message", m.body); if (t === null) return;
+    const body = t.trim(); if (!body || body === m.body) return;
+    if (body.length > 1000) return alert("Message is too long.");
+    const { data, error } = await sb.rpc("edit_message", { msg_id: m.id, new_body: body });
+    if (error) return alert("Could not edit the message.");
+    apply(data);
+  }
+  async function delMsg(m){
+    if (!confirm("Delete this message for everyone?")) return;
+    const { data, error } = await sb.rpc("delete_message", { msg_id: m.id });
+    if (error) return alert("Could not delete the message.");
+    if (m.image_url && m.image_url.startsWith(PUB)) {
+      try { await sb.storage.from("chat-images").remove([m.image_url.slice(PUB.length)]); } catch (e) {}
+    }
+    apply(data);
+  }
+
+  const _start2 = start;
+  window.start = async function(u){
+    await _start2(u);
+    if (ech) sb.removeChannel(ech);
+    ech = sb.channel("edits").on("postgres_changes",
+      { event: "UPDATE", schema: "public", table: "messages", filter: "recipient_id=eq." + me },
+      p => apply(p.new)).subscribe();
+  };
+  $("out").addEventListener("click", () => { if (ech) { sb.removeChannel(ech); ech = null; } });
+})();
+
 
 
 </script>
