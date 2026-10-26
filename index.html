@@ -51,7 +51,8 @@ form{display:flex;gap:8px;padding:10px;background:var(--card);border-top:1px sol
   </div>
 
   <div id="s-list" class="screen">
-    <header><h1 id="me"></h1><button class="ghost" id="out">Log out</button></header>
+    <header><h1 id="me"></h1><img id="myAvatar" class="av" alt="" title="Change photo"><input type="file" id="avatarInput" accept="image/jpeg,image/png,image/webp,image/gif" hidden>
+<button class="ghost" id="out">Log out</button></header>
     <div style="padding:10px 10px 0"><input id="search" placeholder="Search usernames"></div>
     <div id="list"></div>
   </div>
@@ -486,6 +487,73 @@ $("rep").onclick = async () => {
   };
 })();
 
+/* ====== AVATARS (added) ====== */
+(function(){
+  const DEF = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' fill='%239aa3af'/%3E%3Ccircle cx='20' cy='15' r='7' fill='white'/%3E%3Cellipse cx='20' cy='36' rx='13' ry='10' fill='white'/%3E%3C/svg%3E";
+  const css = document.createElement("style");
+  css.textContent = "#myAvatar{cursor:pointer;order:-1}.row{align-items:center}";
+  document.head.appendChild(css);
+
+  const av = new Map(), tried = new Set();
+  const mine = $("myAvatar"), inp = $("avatarInput");
+  mine.src = DEF;
+  mine.onclick = () => inp.click();
+
+  async function loadAvatars(){
+    try {
+      const { data } = await sb.from("profiles").select("id,username,avatar_url");
+      (data || []).forEach(p => {
+        av.set(p.username, p.avatar_url || "");
+        if (p.id === me) mine.src = p.avatar_url || DEF;
+      });
+    } catch (e) {}
+  }
+
+  function paint(){
+    document.querySelectorAll("#list .row").forEach(r => {
+      const s = r.firstElementChild; if (!s) return;
+      if (!s.dataset.n) s.dataset.n = s.textContent;
+      let img = s.querySelector("img");
+      if (!img) {
+        img = new Image(); img.className = "av sm"; img.alt = "";
+        s.style.cssText = "display:flex;align-items:center;gap:10px";
+        s.insertBefore(img, s.firstChild);
+      }
+      const u = av.get(s.dataset.n) || DEF;
+      if (img.src !== u) img.src = u;
+    });
+  }
+  function decorate(){
+    paint();
+    let miss = false;
+    document.querySelectorAll("#list .row").forEach(r => {
+      const n = r.firstElementChild && r.firstElementChild.dataset.n;
+      if (n && !av.has(n) && !tried.has(n)) { tried.add(n); miss = true; }
+    });
+    if (miss) loadAvatars().then(paint);
+  }
+
+  const _r = window.renderList;
+  window.renderList = function(){ _r(); decorate(); };
+  const _s = window.start;
+  window.start = async function(u){ await _s(u); await loadAvatars(); renderList(); };
+  $("out").addEventListener("click", () => { av.clear(); tried.clear(); mine.src = DEF; });
+
+  inp.onchange = async () => {
+    const fl = inp.files[0]; inp.value = "";
+    if (!fl || !me) return;
+    const exts = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" };
+    if (!exts[fl.type]) return alert("Please choose a JPG, PNG, WebP or GIF picture.");
+    if (fl.size > 2 * 1024 * 1024) return alert("Max size is 2 MB.");
+    const path = me + "/avatar-" + Date.now() + "." + exts[fl.type];
+    const up = await sb.storage.from("avatars").upload(path, fl, { contentType: fl.type });
+    if (up.error) return alert("Upload failed: " + up.error.message);
+    const url = sb.storage.from("avatars").getPublicUrl(path).data.publicUrl;
+    const { error } = await sb.from("profiles").update({ avatar_url: url }).eq("id", me);
+    if (error) return alert("Could not save: " + error.message);
+    av.set(myName, url); mine.src = url;
+  };
+})();
 
 
 
