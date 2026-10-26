@@ -234,6 +234,61 @@ $("rep").onclick = async () => {
     at.disabled = false;
   };
 })();
+/* ====== PRIVATE SEARCH (added) ====== */
+(function(){
+  const s = $("search");
+  s.placeholder = "Type an exact username to find someone";
+  let found = null, tmr = null, seq = 0, cch = null;
+
+  window.renderList = function(){
+    const q = s.value.trim().toLowerCase(), box = $("list"); box.textContent = "";
+    const rows = users.filter(u => !blocked.has(u.id) && u.username.includes(q));
+    if (found && !blocked.has(found.id) && !rows.some(u => u.id === found.id)) rows.unshift(found);
+    if (!rows.length) {
+      const d = document.createElement("div"); d.className = "pad note";
+      d.textContent = q ? "No one found. Usernames must be typed exactly." : "No chats yet. Type someone’s exact username above to start a chat.";
+      box.appendChild(d); return;
+    }
+    rows.forEach(u => {
+      const r = document.createElement("div"); r.className = "row";
+      const a = document.createElement("span"); a.textContent = u.username;
+      const b = document.createElement("span"); b.className = "note"; b.textContent = "Chat ›";
+      r.append(a, b);
+      r.onclick = () => {
+        if (!users.some(x => x.id === u.id)) { users.push(u); users.sort((x, y) => x.username.localeCompare(y.username)); }
+        openChat(u);
+      };
+      box.appendChild(r);
+    });
+  };
+
+  s.oninput = () => {
+    found = null; renderList(); clearTimeout(tmr);
+    const q = s.value.trim().toLowerCase();
+    if (!/^[a-z0-9_]{3,20}$/.test(q) || users.some(u => u.username === q)) return;
+    const my = ++seq;
+    tmr = setTimeout(async () => {
+      const { data } = await sb.rpc("find_user", { uname: q });
+      if (my !== seq) return;
+      found = (data && data[0]) || null; renderList();
+    }, 300);
+  };
+
+  async function refreshContacts(){
+    const { data } = await sb.from("profiles").select("id,username").neq("id", me).order("username");
+    if (data) { users = data; renderList(); }
+  }
+  const _start = start;
+  window.start = async function(u){
+    await _start(u);
+    if (cch) sb.removeChannel(cch);
+    cch = sb.channel("contacts").on("postgres_changes",
+      { event: "INSERT", schema: "public", table: "messages", filter: "recipient_id=eq." + me },
+      p => { if (!users.some(x => x.id === p.new.sender_id)) refreshContacts(); }).subscribe();
+  };
+  $("out").addEventListener("click", () => { if (cch) { sb.removeChannel(cch); cch = null; } found = null; s.value = ""; });
+})();
+
 
 </script>
 </body>
