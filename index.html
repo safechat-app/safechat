@@ -555,6 +555,163 @@ $("rep").onclick = async () => {
   };
 })();
 
+/* ====== ARCHIVE & DELETE CHATS (added) ====== */
+(function(){
+  const css = document.createElement("style");
+  css.textContent = "#list .row{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}#list .arch{padding:14px 16px;color:var(--ac);font-weight:600;cursor:pointer;background:var(--card);border-bottom:1px solid var(--bd)}#csheet{position:fixed;inset:0;background:rgba(0,0,0,.4);display:none;align-items:flex-end;justify-content:center;z-index:9}#csheet.on{display:flex}#csheet>div{background:var(--card);width:100%;max-width:520px;padding:12px;border-radius:16px 16px 0 0;display:flex;flex-direction:column;gap:8px;padding-bottom:calc(12px + env(safe-area-inset-bottom,0px))}#csheet p{margin:4px 4px 0;font-weight:600;text-align:center}#csheet button{background:var(--them);color:var(--tx)}#csheet button.danger{background:#dc2626;color:#fff}";
+  document.head.appendChild(css);
+
+  const prefs = new Map();
+  let showArch = false, ch = null;
+  const byName = n => users.find(u => u.username === n);
+
+  async function save(id, patch){
+    const cur = Object.assign({ archived: false, hidden: false, cleared_at: null }, prefs.get(id), patch);
+    prefs.set(id, cur);
+    const { error } = await sb.from("chat_prefs").upsert(
+      { user_id: me, peer_id: id, archived: cur.archived, hidden: cur.hidden, cleared_at: cur.cleared_at },
+      { onConflict: "user_id,peer_id" });
+    if (error) alert("Could not save: " + error.message);
+  }
+
+  async function loadPrefs(){
+    try {
+      const { data } = await sb.from("chat_prefs").select("peer_id,archived,hidden,cleared_at").eq("user_id", me);
+      prefs.clear();
+      (data || []).forEach(p => prefs.set(p.peer_id, p));
+      for (const [id, p] of Array.from(prefs)) {
+        if (!p.hidden || !p.cleared_at) continue;
+        const { data: n } = await sb.from("messages").select("id")
+          .eq("sender_id", id).eq("recipient_id", me).gt("created_at", p.cleared_at).limit(1);
+        if (n && n.length) await save(id, { hidden: false });
+      }
+    } catch (e) {}
+  }
+
+  function listen(){
+    if (ch) sb.removeChannel(ch);
+    ch = sb.channel("chatprefs").on("postgres_changes",
+      { event: "INSERT", schema: "public", table: "messages", filter: "recipient_id=eq." + me },
+      async p => {
+        const x = prefs.get(p.new.sender_id);
+        if (x && (x.hidden || x.archived)) { await save(p.new.sender_id, { hidden: false, archived: false }); renderList(); }
+      }).subscribe();
+  }
+
+  const _r = window.renderList;
+  window.renderList = function(){
+    _r();
+    const box = $("list"), q = $("search").value.trim();
+    let vis = 0;
+    box.querySelectorAll(".row").forEach(r => {
+      const u = byName(r.firstElementChild.textContent);
+      const p = u && prefs.get(u.id);
+      let hide = false;
+      if (!q) hide = showArch ? !(p && p.archived) : !!(p && (p.archived || p.hidden));
+      r.style.display = hide ? "none" : "";
+      r.dataset.pid = u ? u.id : "";
+      if (!hide) vis++;
+    });
+    if (q) return;
+    const add = (text, fn, top) => {
+      const d = document.createElement("div"); d.className = "arch"; d.textContent = text; d.onclick = fn;
+      if (top) box.insertBefore(d, box.firstChild); else box.appendChild(d);
+    };
+    const note = text => { const d = document.createElement("div"); d.className = "pad note"; d.textContent = text; box.appendChild(d); };
+    const n = Array.from(prefs.values()).filter(p => p.archived && !p.hidden).length;
+    if (showArch) {
+      add("‹ Back to chats", () => { showArch = false; renderList(); }, true);
+      if (!vis) note("No archived chats.");
+    } else {
+      if (!vis && !box.querySelector(".pad")) note("No chats yet. Type someone's exact username above to start a chat.");
+      if (n) add("Archived (" + n + ") ›", () => { showArch = true; renderList(); });
+    }
+  };
+
+  const sheet = document.createElement("div"); sheet.id = "csheet";
+  const panel = document.createElement("div"); sheet.appendChild(panel);
+  document.body.appendChild(sheet);
+  let openedAt = 0;
+  const close = () => sheet.classList.remove("on");
+  sheet.onclick = e => { if (e.target === sheet && Date.now() - openedAt > 350) close(); };
+  function mk(label, cls, fn){
+    const b = document.createElement("button"); b.type = "button"; b.textContent = label;
+    if (cls) b.className = cls;
+    b.onclick = () => { if (Date.now() - openedAt < 350) return; fn(); };
+    panel.appendChild(b);
+  }
+
+  function openSheet(id){
+    const u = users.find(x => x.id === id); if (!u) return;
+    const p = prefs.get(id) || {};
+    panel.textContent = "";
+    const h = document.createElement("p"); h.textContent = u.username; panel.appendChild(h);
+    mk(p.archived ? "Unarchive chat" : "Archive chat", "", async () => {
+      close(); await save(id, { archived: !p.archived, hidden: false }); renderList();
+    });
+    mk("Delete chat", "danger", async () => {
+      close();
+      if (!confirm("Delete this chat for you? " + u.username + " will still have their copy.")) return;
+      let t = new Date().toISOString();
+      try {
+        const { data } = await sb.from("messages").select("created_at")
+          .or(`and(sender_id.eq.${me},recipient_id.eq.${id}),and(sender_id.eq.${id},recipient_id.eq.${me})`)
+          .order("created_at", { ascending: false }).limit(1);
+        if (data && data[0]) t = data[0].created_at;
+      } catch (e) {}
+      await save(id, { hidden: true, archived: false, cleared_at: t });
+      renderList();
+    });
+    mk("Cancel", "", close);
+    openedAt = Date.now(); sheet.classList.add("on");
+  }
+
+  const list = $("list");
+  let tm = null, fired = false, sx = 0, sy = 0;
+  const stopT = () => { clearTimeout(tm); tm = null; };
+  list.addEventListener("touchstart", e => {
+    fired = false;
+    const r = e.target.closest(".row"); if (!r || !r.dataset.pid) return;
+    const t = e.touches[0]; sx = t.clientX; sy = t.clientY;
+    stopT();
+    tm = setTimeout(() => { fired = true; if (navigator.vibrate) navigator.vibrate(15); openSheet(r.dataset.pid); }, 500);
+  }, { passive: true });
+  list.addEventListener("touchmove", e => {
+    const t = e.touches[0];
+    if (Math.abs(t.clientX - sx) > 10 || Math.abs(t.clientY - sy) > 10) stopT();
+  }, { passive: true });
+  list.addEventListener("touchend", stopT);
+  list.addEventListener("touchcancel", stopT);
+  list.addEventListener("contextmenu", e => {
+    const r = e.target.closest(".row"); if (!r) return;
+    e.preventDefault();
+    if (!fired && r.dataset.pid) { fired = true; openSheet(r.dataset.pid); }
+  });
+  list.addEventListener("click", e => {
+    if (fired) { e.stopPropagation(); e.preventDefault(); fired = false; }
+  }, true);
+
+  const _add = window.addMsg;
+  window.addMsg = function(m){
+    const p = peer && prefs.get(peer.id);
+    if (p && p.cleared_at && new Date(m.created_at) <= new Date(p.cleared_at)) return;
+    _add(m);
+  };
+
+  const _open = openChat;
+  window.openChat = async function(u){
+    const p = prefs.get(u.id);
+    if (p && p.hidden) await save(u.id, { hidden: false });
+    return _open(u);
+  };
+
+  const _s = window.start;
+  window.start = async function(u){ await _s(u); await loadPrefs(); listen(); renderList(); };
+  $("out").addEventListener("click", () => {
+    prefs.clear(); showArch = false;
+    if (ch) { sb.removeChannel(ch); ch = null; }
+  });
+})();
 
 
 </script>
