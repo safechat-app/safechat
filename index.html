@@ -802,6 +802,52 @@ $("rep").onclick = async () => {
     openProfile(u, "s-list");
   }, true);
 })();
+/* ====== PROFILE REPORT & BLOCK (added) ====== */
+(function(){
+  const css = document.createElement("style");
+  css.textContent = "#rep,#blk{display:none!important}.pact{display:flex;gap:10px;justify-content:center;margin:0 0 18px}.pact button{background:var(--them);color:var(--tx)}.pact button.danger{background:#dc2626;color:#fff}";
+  document.head.appendChild(css);
+
+  const _show = window.show;
+  window.show = function(id){
+    _show(id);
+    if (id !== "s-prof") return;
+    const body = $("pbody"), nm = body.querySelector(".pname"), anchor = body.querySelector(".pmsg");
+    if (!nm || !anchor || body.querySelector(".pact")) return;
+    const u = users.find(x => x.username === nm.textContent);
+    if (!u) return;
+
+    const box = document.createElement("div"); box.className = "pact";
+    const rep = document.createElement("button"); rep.type = "button"; rep.textContent = "Report";
+    const blk = document.createElement("button"); blk.type = "button";
+    const label = () => {
+      const b = blocked.has(u.id);
+      blk.textContent = b ? "Unblock" : "Block";
+      blk.className = b ? "" : "danger";
+    };
+    label();
+
+    rep.onclick = async () => {
+      const why = prompt("Why are you reporting " + u.username + "? (optional)"); if (why === null) return;
+      const { error } = await sb.from("reports").insert({ reporter_id: me, reported_id: u.id, reason: why.slice(0, 500) });
+      alert(error ? "Report failed." : "Report sent. Thank you.");
+    };
+    blk.onclick = async () => {
+      if (blocked.has(u.id)) {
+        await sb.from("blocks").delete().eq("blocker_id", me).eq("blocked_id", u.id);
+        blocked.delete(u.id);
+      } else {
+        if (!confirm("Block " + u.username + "?")) return;
+        await sb.from("blocks").insert({ blocker_id: me, blocked_id: u.id });
+        blocked.add(u.id);
+      }
+      label();
+    };
+
+    box.append(rep, blk);
+    anchor.after(box);
+  };
+})();
 
 </script>
 </body>
