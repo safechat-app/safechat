@@ -713,6 +713,95 @@ $("rep").onclick = async () => {
   });
 })();
 
+/* ====== FRIEND PROFILE (added) ====== */
+(function(){
+  const PUB = SUPABASE_URL + "/storage/v1/object/public/chat-images/";
+  const DEF = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' fill='%239aa3af'/%3E%3Ccircle cx='20' cy='15' r='7' fill='white'/%3E%3Cellipse cx='20' cy='36' rx='13' ry='10' fill='white'/%3E%3C/svg%3E";
+  const css = document.createElement("style");
+  css.textContent = ".pbig{width:120px;height:120px;border-radius:50%;object-fit:cover;background:var(--them);display:block;margin:0 auto 10px;cursor:pointer}#s-prof .pname{text-align:center;font-size:20px;font-weight:700;margin:0 0 4px}#s-prof .pmsg{display:block;margin:12px auto 18px}.pgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}.pgrid img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:6px;cursor:pointer;background:var(--them)}#viewer{position:fixed;inset:0;background:rgba(0,0,0,.92);display:none;align-items:center;justify-content:center;z-index:20}#viewer.on{display:flex}#viewer img{max-width:100%;max-height:100%}.hav,#who{cursor:pointer}";
+  document.head.appendChild(css);
+
+  const scr = document.createElement("div"); scr.id = "s-prof"; scr.className = "screen";
+  scr.innerHTML = '<header><button class="ghost" id="pback">‹ Back</button><h1>Profile</h1></header><div class="pad" id="pbody"></div>';
+  $("app").appendChild(scr);
+
+  const vw = document.createElement("div"); vw.id = "viewer";
+  const vi = document.createElement("img"); vw.appendChild(vi);
+  document.body.appendChild(vw);
+  vw.onclick = () => vw.classList.remove("on");
+  function view(url){ vi.src = url; vw.classList.add("on"); }
+
+  let from = "s-list", cur = null, token = 0;
+
+  async function openProfile(u, src){
+    from = src; cur = u; const my = ++token;
+    const body = $("pbody"); body.textContent = "";
+    const big = new Image(); big.className = "pbig"; big.alt = ""; big.src = DEF;
+    const nm = document.createElement("div"); nm.className = "pname"; nm.textContent = u.username;
+    const mb = document.createElement("button"); mb.className = "pmsg"; mb.textContent = "Message";
+    mb.onclick = () => { if (from === "s-chat") show("s-chat"); else openChat(cur); };
+    const cnt = document.createElement("div"); cnt.className = "note"; cnt.style.margin = "0 0 8px"; cnt.textContent = "Loading…";
+    const grid = document.createElement("div"); grid.className = "pgrid";
+    body.append(big, nm, mb, cnt, grid);
+    big.onclick = () => { if (big.dataset.real) view(big.dataset.real); };
+    show("s-prof");
+    try {
+      const { data: p } = await sb.from("profiles").select("username,avatar_url").eq("id", u.id).maybeSingle();
+      if (my !== token) return;
+      if (p) { nm.textContent = p.username; if (p.avatar_url) { big.src = p.avatar_url; big.dataset.real = p.avatar_url; } }
+      let cleared = null;
+      try {
+        const { data: cp } = await sb.from("chat_prefs").select("cleared_at").eq("user_id", me).eq("peer_id", u.id).maybeSingle();
+        cleared = cp && cp.cleared_at;
+      } catch (e) {}
+      const { data } = await sb.from("messages").select("id,image_url,created_at")
+        .or(`and(sender_id.eq.${me},recipient_id.eq.${u.id}),and(sender_id.eq.${u.id},recipient_id.eq.${me})`)
+        .not("image_url", "is", null).is("deleted_at", null)
+        .order("created_at", { ascending: false }).limit(200);
+      if (my !== token) return;
+      const imgs = (data || []).filter(m => m.image_url && m.image_url.startsWith(PUB) && (!cleared || new Date(m.created_at) > new Date(cleared)));
+      cnt.textContent = imgs.length ? "Shared pictures (" + imgs.length + ")" : "No shared pictures yet.";
+      imgs.forEach(m => {
+        const im = new Image(); im.src = m.image_url; im.alt = "Picture"; im.loading = "lazy";
+        im.onclick = () => view(m.image_url);
+        grid.appendChild(im);
+      });
+    } catch (e) { cnt.textContent = "Could not load."; }
+  }
+
+  $("pback").onclick = () => { token++; show(from); };
+
+  const hav = new Image(); hav.className = "av sm hav"; hav.alt = ""; hav.src = DEF;
+  $("who").parentNode.insertBefore(hav, $("who"));
+  const fromChat = () => { if (peer) openProfile(peer, "s-chat"); };
+  $("who").onclick = fromChat; hav.onclick = fromChat;
+
+  const _open = window.openChat;
+  window.openChat = async function(u){
+    hav.src = DEF;
+    sb.from("profiles").select("avatar_url").eq("id", u.id).maybeSingle()
+      .then(({ data }) => { if (data && data.avatar_url && peer && peer.id === u.id) hav.src = data.avatar_url; })
+      .catch(() => {});
+    return _open(u);
+  };
+
+  const list = $("list");
+  let ts = 0, dur = 0;
+  list.addEventListener("touchstart", () => { ts = Date.now(); }, { passive: true });
+  list.addEventListener("touchend", () => { dur = Date.now() - ts; ts = 0; });
+  list.addEventListener("click", e => {
+    const img = e.target.closest && e.target.closest("img.av");
+    if (!img) return;
+    if (dur > 450) { dur = 0; return; }
+    dur = 0;
+    const row = img.closest(".row"); if (!row) return;
+    const s = row.firstElementChild, name = s.dataset.n || s.textContent;
+    const u = users.find(x => x.id === row.dataset.pid) || users.find(x => x.username === name);
+    if (!u) return;
+    e.stopPropagation(); e.preventDefault();
+    openProfile(u, "s-list");
+  }, true);
+})();
 
 </script>
 </body>
