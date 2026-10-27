@@ -1,0 +1,1565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SafeChat</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" <link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="SafeChat">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+content="#0f766e">
+<style>.av{width:40px;height:40px;border-radius:50%;object-fit:cover;background:var(--them);flex:none}
+.av.sm{width:32px;height:32px}
+
+:root{--bg:#f6f7f9;--card:#fff;--tx:#14181f;--mut:#6b7280;--ac:#0f766e;--bd:#e2e5ea;--them:#e8ebf0;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1318;--card:#181d24;--tx:#eef1f5;--mut:#9aa3af;--ac:#14a89b;--bd:#2a313b;--them:#232a33;color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--tx);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+#app{max-width:520px;height:100%;margin:0 auto;display:flex;flex-direction:column}
+.screen{display:none;flex-direction:column;flex:1;min-height:0}.screen.on{display:flex}
+header{padding:12px 14px;background:var(--card);border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:8px}
+header h1{font-size:18px;margin:0;flex:1;overflow:hidden;text-overflow:ellipsis}
+button{font:inherit;border:0;border-radius:10px;padding:10px 14px;background:var(--ac);color:#fff;font-weight:600;cursor:pointer}
+button.ghost{background:transparent;color:var(--ac);padding:6px 8px}
+button:disabled{opacity:.6}
+input{font:inherit;width:100%;padding:12px;border-radius:10px;border:1px solid var(--bd);background:var(--card);color:var(--tx);margin-bottom:10px}
+.pad{padding:20px 16px;overflow-y:auto}
+.note{color:var(--mut);font-size:14px}
+.warn{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:12px;margin:14px 0;font-size:14px}
+.tabs{display:flex;gap:8px;margin-bottom:14px}.tabs button{flex:1;background:var(--them);color:var(--tx)}.tabs button.on{background:var(--ac);color:#fff}
+#err{color:#dc2626;min-height:20px;font-size:14px;margin-bottom:8px}
+#list{flex:1;overflow-y:auto}
+.row{padding:14px 16px;border-bottom:1px solid var(--bd);background:var(--card);display:flex;justify-content:space-between;cursor:pointer}
+#msgs{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:6px}
+.m{max-width:80%;padding:8px 12px;border-radius:14px;background:var(--them);word-wrap:break-word;white-space:pre-wrap}
+.m.me{align-self:flex-end;background:var(--ac);color:#fff}
+form{display:flex;gap:8px;padding:10px;background:var(--card);border-top:1px solid var(--bd)}form input{margin:0}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="s-load" class="screen on"><div class="pad note" id="loadmsg">Loading SafeChat…</div></div>
+
+  <div id="s-auth" class="screen">
+    <header><h1>SafeChat</h1></header>
+    <div class="pad">
+      <div class="tabs"><button id="t-up" class="on">Sign up</button><button id="t-in">Log in</button></div>
+      <input id="u" placeholder="Username (a–z, 0–9, _)" autocapitalize="none" autocomplete="username" maxlength="20">
+      <input id="p" type="password" placeholder="Password (8+ characters)" autocomplete="current-password">
+      <div id="err"></div>
+      <button id="go" style="width:100%">Create account</button>
+      <div class="warn"><b>No email or phone needed.</b> Because of that, a forgotten password <b>cannot be recovered</b>. Write it down somewhere safe.<br><br>Messages are protected so only the two people in a chat can read them, but they are <b>not end-to-end encrypted</b>: the app’s administrator can technically access the database. Don’t send highly sensitive information.</div>
+    </div>
+  </div>
+
+  <div id="s-list" class="screen">
+    <header><h1 id="me"></h1><img id="myAvatar" class="av" alt="" title="Change photo"><input type="file" id="avatarInput" accept="image/jpeg,image/png,image/webp,image/gif" hidden>
+<button class="ghost" id="out">Log out</button></header>
+    <div style="padding:10px 10px 0"><input id="search" placeholder="Search usernames"></div>
+    <div id="list"></div>
+  </div>
+
+  <div id="s-chat" class="screen">
+    <header><button class="ghost" id="back">‹ Back</button><h1 id="who"></h1><button class="ghost" id="rep">Report</button><button class="ghost" id="blk">Block</button></header>
+    <div id="msgs"></div>
+    <form id="f"><input id="txt" placeholder="Message" autocomplete="off" maxlength="1000"><button>Send</button></form>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+/* ====== EDIT THESE TWO LINES (Supabase > Project Settings > API) ====== */
+const SUPABASE_URL = "https://fqzggrmacagniycujxul.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZxemdncm1hY2Fnbml5Y3VqeHVsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5NjUxMjQsImV4cCI6MjEwODU0MTEyNH0.HdNIMxUA5RGJw9Kv3nPnIHBOjB-TYvRDzPwYWCxqHD4";
+/* ====================================================================== */
+
+const $ = id => document.getElementById(id);
+const DOMAIN = "safechat.app"; // hidden fake email domain; no emails are ever sent
+let sb, me = null, myName = "", peer = null, users = [], blocked = new Set(), seen = new Set(), chan = null, mode = "up";
+
+function show(id){ document.querySelectorAll(".screen").forEach(s => s.classList.remove("on")); $(id).classList.add("on"); }
+function err(t){ $("err").textContent = t || ""; }
+const fakeEmail = u => u + "@" + DOMAIN;
+
+function setMode(m){
+  mode = m; err("");
+  $("t-up").classList.toggle("on", m === "up"); $("t-in").classList.toggle("on", m === "in");
+  $("go").textContent = m === "up" ? "Create account" : "Log in";
+  $("p").autocomplete = m === "up" ? "new-password" : "current-password";
+}
+$("t-up").onclick = () => setMode("up"); $("t-in").onclick = () => setMode("in");
+
+$("go").onclick = async () => {
+  err("");
+  const u = $("u").value.trim().toLowerCase(), p = $("p").value;
+  if (!/^[a-z0-9_]{3,20}$/.test(u)) return err("Username: 3–20 letters, numbers or underscores.");
+  if (p.length < 8) return err("Password must be at least 8 characters.");
+  $("go").disabled = true;
+  try {
+    let r;
+    if (mode === "up") r = await sb.auth.signUp({ email: fakeEmail(u), password: p, options: { data: { username: u } } });
+    else r = await sb.auth.signInWithPassword({ email: fakeEmail(u), password: p });
+    if (r.error) {
+      const m = r.error.message || "";
+      err(/already|registered/i.test(m) ? "That username is taken." : /invalid login/i.test(m) ? "Wrong username or password." : /rate/i.test(m) ? "Too many tries. Wait a minute." : "Something went wrong: " + m);
+    } else if (!r.data.session) {
+      err("Sign-up worked, but email confirmation is still ON in Supabase. Turn it off (see setup steps).");
+    } else await start(r.data.session.user);
+  } catch (e) { err("Network problem. Try again."); }
+  $("go").disabled = false;
+};
+
+async function start(user){
+  me = user.id;
+  const { data: prof } = await sb.from("profiles").select("username").eq("id", me).single();
+  myName = prof ? prof.username : "me";
+  $("me").textContent = "SafeChat · " + myName;
+  const { data: b } = await sb.from("blocks").select("blocked_id").eq("blocker_id", me);
+  blocked = new Set((b || []).map(x => x.blocked_id));
+  const { data: us } = await sb.from("profiles").select("id,username").neq("id", me).order("username");
+  users = us || [];
+  renderList(); show("s-list");
+  if (chan) sb.removeChannel(chan);
+  chan = sb.channel("inbox").on("postgres_changes",
+    { event: "INSERT", schema: "public", table: "messages", filter: "recipient_id=eq." + me },
+    p => { if (peer && p.new.sender_id === peer.id) addMsg(p.new); }).subscribe();
+}
+
+function renderList(){
+  const q = $("search").value.trim().toLowerCase(), box = $("list"); box.textContent = "";
+  const shown = users.filter(u => !blocked.has(u.id) && u.username.includes(q));
+  if (!shown.length){ const d = document.createElement("div"); d.className = "pad note"; d.textContent = users.length ? "No matching usernames." : "You’re the first one here. Share the link with a friend so they can sign up."; box.appendChild(d); return; }
+  shown.forEach(u => {
+    const r = document.createElement("div"); r.className = "row";
+    const a = document.createElement("span"); a.textContent = u.username;
+    const b = document.createElement("span"); b.className = "note"; b.textContent = "Chat ›";
+    r.append(a, b); r.onclick = () => openChat(u); box.appendChild(r);
+  });
+}
+$("search").oninput = renderList;
+$("out").onclick = async () => { await sb.auth.signOut(); if (chan) sb.removeChannel(chan); me = peer = null; $("p").value = ""; show("s-auth"); };
+
+function addMsg(m){
+  if (seen.has(m.id)) return; seen.add(m.id);
+  const d = document.createElement("div"); d.className = "m" + (m.sender_id === me ? " me" : ""); d.textContent = m.body;
+  const box = $("msgs"); box.appendChild(d); box.scrollTop = box.scrollHeight;
+}
+
+async function openChat(u){
+  peer = u; seen = new Set(); $("who").textContent = u.username; $("blk").textContent = blocked.has(u.id) ? "Unblock" : "Block";
+  $("msgs").textContent = ""; show("s-chat");
+  const { data } = await sb.from("messages").select("*")
+    .or(`and(sender_id.eq.${me},recipient_id.eq.${u.id}),and(sender_id.eq.${u.id},recipient_id.eq.${me})`)
+    .order("created_at").limit(200);
+  (data || []).forEach(addMsg);
+}
+$("back").onclick = () => { peer = null; renderList(); show("s-list"); };
+
+$("f").onsubmit = async e => {
+  e.preventDefault();
+  const t = $("txt").value.trim(); if (!t || !peer) return;
+  if (blocked.has(peer.id)) return alert("Unblock this user to send messages.");
+  $("txt").value = "";
+  const { data, error } = await sb.from("messages").insert({ sender_id: me, recipient_id: peer.id, body: t }).select().single();
+  if (error) alert("Message could not be sent."); else addMsg(data);
+};
+
+$("blk").onclick = async () => {
+  if (blocked.has(peer.id)){ await sb.from("blocks").delete().eq("blocker_id", me).eq("blocked_id", peer.id); blocked.delete(peer.id); }
+  else { await sb.from("blocks").insert({ blocker_id: me, blocked_id: peer.id }); blocked.add(peer.id); }
+  $("blk").textContent = blocked.has(peer.id) ? "Unblock" : "Block";
+};
+$("rep").onclick = async () => {
+  const why = prompt("Why are you reporting " + peer.username + "? (optional)"); if (why === null) return;
+  const { error } = await sb.from("reports").insert({ reporter_id: me, reported_id: peer.id, reason: why.slice(0, 500) });
+  alert(error ? "Report failed." : "Report sent. Thank you.");
+};
+
+(async function init(){
+  if (SUPABASE_URL.startsWith("PASTE") || SUPABASE_KEY.startsWith("PASTE")){
+    $("loadmsg").textContent = "Setup needed: open index.html and paste your Supabase URL and anon key at the top.";
+    return;
+  }
+  sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  const { data } = await sb.auth.getSession();
+  if (data.session) await start(data.session.user); else show("s-auth");
+})();
+/* ====== PICTURES (added) ====== */
+(function(){
+  const st = document.createElement("style");
+  st.textContent = ".m.pic{padding:4px;background:transparent!important}.m img{display:block;max-width:100%;max-height:320px;border-radius:10px;cursor:pointer}#attach{background:var(--them);color:var(--tx);padding:10px 12px}";
+  document.head.appendChild(st);
+
+  const PUB = SUPABASE_URL + "/storage/v1/object/public/chat-images/";
+  const f = $("f");
+  const at = document.createElement("button");
+  at.type = "button"; at.id = "attach"; at.textContent = "📎"; at.setAttribute("aria-label", "Send a picture");
+  const file = document.createElement("input");
+  file.type = "file"; file.accept = "image/jpeg,image/png,image/webp,image/gif"; file.hidden = true;
+  f.insertBefore(at, $("txt")); f.appendChild(file);
+
+  window.addMsg = function(m){
+    if (seen.has(m.id)) return; seen.add(m.id);
+    const box = $("msgs");
+    const d = document.createElement("div"); d.className = "m" + (m.sender_id === me ? " me" : "");
+    if (m.image_url && m.image_url.startsWith(PUB)) {
+      d.classList.add("pic");
+      const im = document.createElement("img");
+      im.src = m.image_url; im.alt = "Picture"; im.loading = "lazy";
+      im.onload = () => { box.scrollTop = box.scrollHeight; };
+      im.onclick = () => window.open(m.image_url, "_blank", "noopener");
+      d.appendChild(im);
+    } else d.textContent = m.body;
+    box.appendChild(d); box.scrollTop = box.scrollHeight;
+  };
+
+  at.onclick = () => {
+    if (!peer) return;
+    if (blocked.has(peer.id)) return alert("Unblock this user to send messages.");
+    file.click();
+  };
+
+  file.onchange = async () => {
+    const fl = file.files[0]; file.value = "";
+    if (!fl || !peer) return;
+    const exts = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" };
+    if (!exts[fl.type]) return alert("Please choose a JPG, PNG, WebP or GIF picture.");
+    if (fl.size > 5 * 1024 * 1024) return alert("That picture is over 5 MB.");
+    at.disabled = true;
+    try {
+      const path = me + "/" + Date.now() + "-" + Math.random().toString(36).slice(2, 10) + "." + exts[fl.type];
+      const up = await sb.storage.from("chat-images").upload(path, fl, { contentType: fl.type });
+      if (up.error) throw up.error;
+      const url = sb.storage.from("chat-images").getPublicUrl(path).data.publicUrl;
+      const { data, error } = await sb.from("messages")
+        .insert({ sender_id: me, recipient_id: peer.id, body: "[picture]", image_url: url }).select().single();
+      if (error) throw error;
+      addMsg(data);
+    } catch (e) { alert("Picture could not be sent."); }
+    at.disabled = false;
+  };
+})();
+/* ====== PRIVATE SEARCH (added) ====== */
+(function(){
+  const s = $("search");
+  s.placeholder = "Type an exact username to find someone";
+  let found = null, tmr = null, seq = 0, cch = null;
+
+  window.renderList = function(){
+    const q = s.value.trim().toLowerCase(), box = $("list"); box.textContent = "";
+    const rows = users.filter(u => !blocked.has(u.id) && u.username.includes(q));
+    if (found && !blocked.has(found.id) && !rows.some(u => u.id === found.id)) rows.unshift(found);
+    if (!rows.length) {
+      const d = document.createElement("div"); d.className = "pad note";
+      d.textContent = q ? "No one found. Usernames must be typed exactly." : "No chats yet. Type someone’s exact username above to start a chat.";
+      box.appendChild(d); return;
+    }
+    rows.forEach(u => {
+      const r = document.createElement("div"); r.className = "row";
+      const a = document.createElement("span"); a.textContent = u.username;
+      const b = document.createElement("span"); b.className = "note"; b.textContent = "Chat ›";
+      r.append(a, b);
+      r.onclick = () => {
+        if (!users.some(x => x.id === u.id)) { users.push(u); users.sort((x, y) => x.username.localeCompare(y.username)); }
+        openChat(u);
+      };
+      box.appendChild(r);
+    });
+  };
+
+  s.oninput = () => {
+    found = null; renderList(); clearTimeout(tmr);
+    const q = s.value.trim().toLowerCase();
+    if (!/^[a-z0-9_]{3,20}$/.test(q) || users.some(u => u.username === q)) return;
+    const my = ++seq;
+    tmr = setTimeout(async () => {
+      const { data } = await sb.rpc("find_user", { uname: q });
+      if (my !== seq) return;
+      found = (data && data[0]) || null; renderList();
+    }, 300);
+  };
+
+  async function refreshContacts(){
+    const { data } = await sb.from("profiles").select("id,username").neq("id", me).order("username");
+    if (data) { users = data; renderList(); }
+  }
+  const _start = start;
+  window.start = async function(u){
+    await _start(u);
+    if (cch) sb.removeChannel(cch);
+    cch = sb.channel("contacts").on("postgres_changes",
+      { event: "INSERT", schema: "public", table: "messages", filter: "recipient_id=eq." + me },
+      p => { if (!users.some(x => x.id === p.new.sender_id)) refreshContacts(); }).subscribe();
+  };
+  $("out").addEventListener("click", () => { if (cch) { sb.removeChannel(cch); cch = null; } found = null; s.value = ""; });
+})();
+/* ====== EDIT & DELETE (added) ====== */
+(function(){
+  const PUB = SUPABASE_URL + "/storage/v1/object/public/chat-images/";
+  const css = document.createElement("style");
+  css.textContent = ".m.del{font-style:italic;background:transparent!important;border:1px dashed var(--bd);color:var(--mut)!important}.m small{display:block;font-size:11px;opacity:.7;margin-top:2px}#sheet{position:fixed;inset:0;background:rgba(0,0,0,.4);display:none;align-items:flex-end;justify-content:center;z-index:9}#sheet.on{display:flex}#sheet>div{background:var(--card);width:100%;max-width:520px;padding:12px;border-radius:16px 16px 0 0;display:flex;flex-direction:column;gap:8px;padding-bottom:calc(12px + env(safe-area-inset-bottom,0px))}#sheet button{background:var(--them);color:var(--tx)}#sheet button.danger{background:#dc2626;color:#fff}";
+  document.head.appendChild(css);
+
+  const store = new Map();
+  let ech = null;
+
+  function fill(d, m){
+    d.textContent = ""; d.classList.remove("pic", "del");
+    if (m.deleted_at) { d.classList.add("del"); d.textContent = "Message deleted"; return; }
+    if (m.image_url && m.image_url.startsWith(PUB)) {
+      d.classList.add("pic");
+      const im = document.createElement("img");
+      im.src = m.image_url; im.alt = "Picture"; im.loading = "lazy";
+      im.onload = () => { const b = $("msgs"); b.scrollTop = b.scrollHeight; };
+      im.onclick = () => { if (m.sender_id !== me) window.open(m.image_url, "_blank", "noopener"); };
+      d.appendChild(im);
+    } else d.textContent = m.body;
+    if (m.edited_at) { const s = document.createElement("small"); s.textContent = "edited"; d.appendChild(s); }
+  }
+
+  window.addMsg = function(m){
+    if (seen.has(m.id)) return; seen.add(m.id);
+    const box = $("msgs");
+    const d = document.createElement("div");
+    d.className = "m" + (m.sender_id === me ? " me" : ""); d.dataset.id = m.id;
+    store.set(m.id, m); fill(d, m);
+    if (m.sender_id === me) d.onclick = () => openSheet(Number(d.dataset.id));
+    box.appendChild(d); box.scrollTop = box.scrollHeight;
+  };
+
+  function apply(m){
+    if (!m) return;
+    store.set(m.id, m);
+    const d = document.querySelector('#msgs [data-id="' + m.id + '"]');
+    if (d) fill(d, m);
+  }
+
+  const sheet = document.createElement("div"); sheet.id = "sheet";
+  const panel = document.createElement("div"); sheet.appendChild(panel);
+  document.body.appendChild(sheet);
+  const close = () => sheet.classList.remove("on");
+  sheet.onclick = e => { if (e.target === sheet) close(); };
+  function mk(label, cls, fn){
+    const b = document.createElement("button"); b.type = "button"; b.textContent = label;
+    if (cls) b.className = cls; b.onclick = fn; panel.appendChild(b);
+  }
+  function openSheet(id){
+    const m = store.get(id); if (!m || m.deleted_at) return;
+    panel.textContent = "";
+    if (m.image_url) mk("View picture", "", () => { close(); window.open(m.image_url, "_blank", "noopener"); });
+    else mk("Edit message", "", () => { close(); editMsg(m); });
+    mk("Delete message", "danger", () => { close(); delMsg(m); });
+    mk("Cancel", "", close);
+    sheet.classList.add("on");
+  }
+
+  async function editMsg(m){
+    const t = prompt("Edit message", m.body); if (t === null) return;
+    const body = t.trim(); if (!body || body === m.body) return;
+    if (body.length > 1000) return alert("Message is too long.");
+    const { data, error } = await sb.rpc("edit_message", { msg_id: m.id, new_body: body });
+    if (error) return alert("Could not edit the message.");
+    apply(data);
+  }
+  async function delMsg(m){
+    if (!confirm("Delete this message for everyone?")) return;
+    const { data, error } = await sb.rpc("delete_message", { msg_id: m.id });
+    if (error) return alert("Could not delete the message.");
+    if (m.image_url && m.image_url.startsWith(PUB)) {
+      try { await sb.storage.from("chat-images").remove([m.image_url.slice(PUB.length)]); } catch (e) {}
+    }
+    apply(data);
+  }
+
+  const _start2 = start;
+  window.start = async function(u){
+    await _start2(u);
+    if (ech) sb.removeChannel(ech);
+    ech = sb.channel("edits").on("postgres_changes",
+      { event: "UPDATE", schema: "public", table: "messages", filter: "recipient_id=eq." + me },
+      p => apply(p.new)).subscribe();
+  };
+  $("out").addEventListener("click", () => { if (ech) { sb.removeChannel(ech); ech = null; } });
+})();
+/* ====== VOICE NOTES (added) ====== */
+(function(){
+  const APUB = SUPABASE_URL + "/storage/v1/object/public/chat-audio/";
+  const MAX_SECS = 120;
+  const css = document.createElement("style");
+  css.textContent = "#mic,#cancelrec{background:var(--them);color:var(--tx);padding:10px 12px}#mic.rec{background:#dc2626;color:#fff}.m.aud{padding:6px}.m audio{display:block;width:240px;max-width:100%;height:40px}.m .rm{background:transparent;color:inherit;font-size:12px;font-weight:400;padding:4px 0 0;opacity:.85;text-decoration:underline}";
+  document.head.appendChild(css);
+
+  const f = $("f");
+  const mic = document.createElement("button");
+  mic.type = "button"; mic.id = "mic"; mic.textContent = "🎤"; mic.setAttribute("aria-label", "Record a voice note");
+  const cancel = document.createElement("button");
+  cancel.type = "button"; cancel.id = "cancelrec"; cancel.textContent = "✕"; cancel.hidden = true; cancel.setAttribute("aria-label", "Cancel recording");
+  f.insertBefore(mic, $("txt")); f.insertBefore(cancel, $("txt"));
+
+  let rec = null, chunks = [], stream = null, t0 = 0, tick = null, cancelled = false, target = null;
+
+  function pickType(){
+    if (!window.MediaRecorder) return "";
+    for (const t of ["audio/mp4", "audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"])
+      if (MediaRecorder.isTypeSupported(t)) return t;
+    return "";
+  }
+  function fmt(ms){ const s = Math.floor(ms / 1000); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); }
+  function ui(on){
+    mic.classList.toggle("rec", on); cancel.hidden = !on;
+    mic.textContent = on ? "⏹ 0:00" : "🎤";
+    $("txt").disabled = on;
+  }
+
+  async function startRec(){
+    if (!peer) return;
+    if (blocked.has(peer.id)) return alert("Unblock this user to send messages.");
+    if (!navigator.mediaDevices || !window.MediaRecorder) return alert("Voice notes are not supported in this browser.");
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch (e) { return alert("Please allow microphone access to record voice notes."); }
+    const type = pickType();
+    try { rec = type ? new MediaRecorder(stream, { mimeType: type }) : new MediaRecorder(stream); }
+    catch (e) { stream.getTracks().forEach(t => t.stop()); return alert("Could not start recording."); }
+    chunks = []; cancelled = false; target = peer;
+    rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+    rec.onstop = onStop;
+    rec.start(); t0 = Date.now(); ui(true);
+    tick = setInterval(() => {
+      const el = Date.now() - t0; mic.textContent = "⏹ " + fmt(el);
+      if (el >= MAX_SECS * 1000) stopRec();
+    }, 250);
+  }
+  function stopRec(){ if (rec && rec.state !== "inactive") rec.stop(); }
+  function cancelRec(){ cancelled = true; stopRec(); }
+
+  async function onStop(){
+    clearInterval(tick); tick = null;
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    ui(false);
+    const el = Date.now() - t0, to = target, parts = chunks, type = (rec && rec.mimeType) || pickType() || "audio/mp4";
+    rec = null; stream = null;
+    if (cancelled || !parts.length || !to) return;
+    if (el < 1000) return alert("That recording was too short.");
+    const base = (type.split(";")[0] || "audio/mp4");
+    const ext = base.includes("mp4") ? "m4a" : base.includes("ogg") ? "ogg" : "webm";
+    const blob = new Blob(parts, { type: base });
+    if (blob.size > 10 * 1024 * 1024) return alert("That voice note is too large.");
+    mic.disabled = true;
+    try {
+      const path = me + "/" + Date.now() + "-" + Math.random().toString(36).slice(2, 10) + "." + ext;
+      const up = await sb.storage.from("chat-audio").upload(path, blob, { contentType: base });
+      if (up.error) throw up.error;
+      const url = sb.storage.from("chat-audio").getPublicUrl(path).data.publicUrl;
+      const { data, error } = await sb.from("messages")
+        .insert({ sender_id: me, recipient_id: to.id, body: "[voice note]", audio_url: url }).select().single();
+      if (error) throw error;
+      if (peer && peer.id === to.id) addMsg(data);
+    } catch (e) { alert("Voice note could not be sent."); }
+    mic.disabled = false;
+  }
+
+  mic.onclick = () => { if (rec && rec.state === "recording") stopRec(); else startRec(); };
+  cancel.onclick = cancelRec;
+  $("back").addEventListener("click", () => { if (rec) cancelRec(); });
+  $("out").addEventListener("click", () => { if (rec) cancelRec(); });
+
+  const _add = window.addMsg;
+  window.addMsg = function(m){
+    _add(m);
+    if (!m.audio_url || m.deleted_at || !m.audio_url.startsWith(APUB)) return;
+    const d = document.querySelector('#msgs [data-id="' + m.id + '"]');
+    if (!d || d.querySelector("audio")) return;
+    d.textContent = ""; d.onclick = null; d.classList.add("aud");
+    const a = document.createElement("audio");
+    a.controls = true; a.preload = "metadata"; a.src = m.audio_url;
+    d.appendChild(a);
+    if (m.sender_id === me) {
+      const x = document.createElement("button");
+      x.type = "button"; x.className = "rm"; x.textContent = "Delete";
+      x.onclick = async () => {
+        if (!confirm("Delete this voice note for everyone?")) return;
+        const { error } = await sb.rpc("delete_message", { msg_id: m.id });
+        if (error) return alert("Could not delete the voice note.");
+        try { await sb.storage.from("chat-audio").remove([m.audio_url.slice(APUB.length)]); } catch (e) {}
+        d.className = "m del me"; d.textContent = "Message deleted";
+      };
+      d.appendChild(x);
+    }
+    const box = $("msgs"); box.scrollTop = box.scrollHeight;
+  };
+})();
+
+/* ====== AVATARS (added) ====== */
+(function(){
+  const DEF = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' fill='%239aa3af'/%3E%3Ccircle cx='20' cy='15' r='7' fill='white'/%3E%3Cellipse cx='20' cy='36' rx='13' ry='10' fill='white'/%3E%3C/svg%3E";
+  const css = document.createElement("style");
+  css.textContent = "#myAvatar{cursor:pointer;order:-1}.row{align-items:center}";
+  document.head.appendChild(css);
+
+  const av = new Map(), tried = new Set();
+  const mine = $("myAvatar"), inp = $("avatarInput");
+  mine.src = DEF;
+  mine.onclick = () => inp.click();
+
+  async function loadAvatars(){
+    try {
+      const { data } = await sb.from("profiles").select("id,username,avatar_url");
+      (data || []).forEach(p => {
+        av.set(p.username, p.avatar_url || "");
+        if (p.id === me) mine.src = p.avatar_url || DEF;
+      });
+    } catch (e) {}
+  }
+
+  function paint(){
+    document.querySelectorAll("#list .row").forEach(r => {
+      const s = r.firstElementChild; if (!s) return;
+      if (!s.dataset.n) s.dataset.n = s.textContent;
+      let img = s.querySelector("img");
+      if (!img) {
+        img = new Image(); img.className = "av sm"; img.alt = "";
+        s.style.cssText = "display:flex;align-items:center;gap:10px";
+        s.insertBefore(img, s.firstChild);
+      }
+      const u = av.get(s.dataset.n) || DEF;
+      if (img.src !== u) img.src = u;
+    });
+  }
+  function decorate(){
+    paint();
+    let miss = false;
+    document.querySelectorAll("#list .row").forEach(r => {
+      const n = r.firstElementChild && r.firstElementChild.dataset.n;
+      if (n && !av.has(n) && !tried.has(n)) { tried.add(n); miss = true; }
+    });
+    if (miss) loadAvatars().then(paint);
+  }
+
+  const _r = window.renderList;
+  window.renderList = function(){ _r(); decorate(); };
+  const _s = window.start;
+  window.start = async function(u){ await _s(u); await loadAvatars(); renderList(); };
+  $("out").addEventListener("click", () => { av.clear(); tried.clear(); mine.src = DEF; });
+
+  inp.onchange = async () => {
+    const fl = inp.files[0]; inp.value = "";
+    if (!fl || !me) return;
+    const exts = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" };
+    if (!exts[fl.type]) return alert("Please choose a JPG, PNG, WebP or GIF picture.");
+    if (fl.size > 2 * 1024 * 1024) return alert("Max size is 2 MB.");
+    const path = me + "/avatar-" + Date.now() + "." + exts[fl.type];
+    const up = await sb.storage.from("avatars").upload(path, fl, { contentType: fl.type });
+    if (up.error) return alert("Upload failed: " + up.error.message);
+    const url = sb.storage.from("avatars").getPublicUrl(path).data.publicUrl;
+    const { error } = await sb.from("profiles").update({ avatar_url: url }).eq("id", me);
+    if (error) return alert("Could not save: " + error.message);
+    av.set(myName, url); mine.src = url;
+  };
+})();
+
+/* ====== ARCHIVE & DELETE CHATS (added) ====== */
+(function(){
+  const css = document.createElement("style");
+  css.textContent = "#list .row{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}#list .arch{padding:14px 16px;color:var(--ac);font-weight:600;cursor:pointer;background:var(--card);border-bottom:1px solid var(--bd)}#csheet{position:fixed;inset:0;background:rgba(0,0,0,.4);display:none;align-items:flex-end;justify-content:center;z-index:9}#csheet.on{display:flex}#csheet>div{background:var(--card);width:100%;max-width:520px;padding:12px;border-radius:16px 16px 0 0;display:flex;flex-direction:column;gap:8px;padding-bottom:calc(12px + env(safe-area-inset-bottom,0px))}#csheet p{margin:4px 4px 0;font-weight:600;text-align:center}#csheet button{background:var(--them);color:var(--tx)}#csheet button.danger{background:#dc2626;color:#fff}";
+  document.head.appendChild(css);
+
+  const prefs = new Map();
+  let showArch = false, ch = null;
+  const byName = n => users.find(u => u.username === n);
+
+  async function save(id, patch){
+    const cur = Object.assign({ archived: false, hidden: false, cleared_at: null }, prefs.get(id), patch);
+    prefs.set(id, cur);
+    const { error } = await sb.from("chat_prefs").upsert(
+      { user_id: me, peer_id: id, archived: cur.archived, hidden: cur.hidden, cleared_at: cur.cleared_at },
+      { onConflict: "user_id,peer_id" });
+    if (error) alert("Could not save: " + error.message);
+  }
+
+  async function loadPrefs(){
+    try {
+      const { data } = await sb.from("chat_prefs").select("peer_id,archived,hidden,cleared_at").eq("user_id", me);
+      prefs.clear();
+      (data || []).forEach(p => prefs.set(p.peer_id, p));
+      for (const [id, p] of Array.from(prefs)) {
+        if (!p.hidden || !p.cleared_at) continue;
+        const { data: n } = await sb.from("messages").select("id")
+          .eq("sender_id", id).eq("recipient_id", me).gt("created_at", p.cleared_at).limit(1);
+        if (n && n.length) await save(id, { hidden: false });
+      }
+    } catch (e) {}
+  }
+
+  function listen(){
+    if (ch) sb.removeChannel(ch);
+    ch = sb.channel("chatprefs").on("postgres_changes",
+      { event: "INSERT", schema: "public", table: "messages", filter: "recipient_id=eq." + me },
+      async p => {
+        const x = prefs.get(p.new.sender_id);
+        if (x && (x.hidden || x.archived)) { await save(p.new.sender_id, { hidden: false, archived: false }); renderList(); }
+      }).subscribe();
+  }
+
+  const _r = window.renderList;
+  window.renderList = function(){
+    _r();
+    const box = $("list"), q = $("search").value.trim();
+    let vis = 0;
+    box.querySelectorAll(".row").forEach(r => {
+      const u = byName(r.firstElementChild.textContent);
+      const p = u && prefs.get(u.id);
+      let hide = false;
+      if (!q) hide = showArch ? !(p && p.archived) : !!(p && (p.archived || p.hidden));
+      r.style.display = hide ? "none" : "";
+      r.dataset.pid = u ? u.id : "";
+      if (!hide) vis++;
+    });
+    if (q) return;
+    const add = (text, fn, top) => {
+      const d = document.createElement("div"); d.className = "arch"; d.textContent = text; d.onclick = fn;
+      if (top) box.insertBefore(d, box.firstChild); else box.appendChild(d);
+    };
+    const note = text => { const d = document.createElement("div"); d.className = "pad note"; d.textContent = text; box.appendChild(d); };
+    const n = Array.from(prefs.values()).filter(p => p.archived && !p.hidden).length;
+    if (showArch) {
+      add("‹ Back to chats", () => { showArch = false; renderList(); }, true);
+      if (!vis) note("No archived chats.");
+    } else {
+      if (!vis && !box.querySelector(".pad")) note("No chats yet. Type someone's exact username above to start a chat.");
+      if (n) add("Archived (" + n + ") ›", () => { showArch = true; renderList(); });
+    }
+  };
+
+  const sheet = document.createElement("div"); sheet.id = "csheet";
+  const panel = document.createElement("div"); sheet.appendChild(panel);
+  document.body.appendChild(sheet);
+  let openedAt = 0;
+  const close = () => sheet.classList.remove("on");
+  sheet.onclick = e => { if (e.target === sheet && Date.now() - openedAt > 350) close(); };
+  function mk(label, cls, fn){
+    const b = document.createElement("button"); b.type = "button"; b.textContent = label;
+    if (cls) b.className = cls;
+    b.onclick = () => { if (Date.now() - openedAt < 350) return; fn(); };
+    panel.appendChild(b);
+  }
+
+  function openSheet(id){
+    const u = users.find(x => x.id === id); if (!u) return;
+    const p = prefs.get(id) || {};
+    panel.textContent = "";
+    const h = document.createElement("p"); h.textContent = u.username; panel.appendChild(h);
+    mk(p.archived ? "Unarchive chat" : "Archive chat", "", async () => {
+      close(); await save(id, { archived: !p.archived, hidden: false }); renderList();
+    });
+    mk("Delete chat", "danger", async () => {
+      close();
+      if (!confirm("Delete this chat for you? " + u.username + " will still have their copy.")) return;
+      let t = new Date().toISOString();
+      try {
+        const { data } = await sb.from("messages").select("created_at")
+          .or(`and(sender_id.eq.${me},recipient_id.eq.${id}),and(sender_id.eq.${id},recipient_id.eq.${me})`)
+          .order("created_at", { ascending: false }).limit(1);
+        if (data && data[0]) t = data[0].created_at;
+      } catch (e) {}
+      await save(id, { hidden: true, archived: false, cleared_at: t });
+      renderList();
+    });
+    mk("Cancel", "", close);
+    openedAt = Date.now(); sheet.classList.add("on");
+  }
+
+  const list = $("list");
+  let tm = null, fired = false, sx = 0, sy = 0;
+  const stopT = () => { clearTimeout(tm); tm = null; };
+  list.addEventListener("touchstart", e => {
+    fired = false;
+    const r = e.target.closest(".row"); if (!r || !r.dataset.pid) return;
+    const t = e.touches[0]; sx = t.clientX; sy = t.clientY;
+    stopT();
+    tm = setTimeout(() => { fired = true; if (navigator.vibrate) navigator.vibrate(15); openSheet(r.dataset.pid); }, 500);
+  }, { passive: true });
+  list.addEventListener("touchmove", e => {
+    const t = e.touches[0];
+    if (Math.abs(t.clientX - sx) > 10 || Math.abs(t.clientY - sy) > 10) stopT();
+  }, { passive: true });
+  list.addEventListener("touchend", stopT);
+  list.addEventListener("touchcancel", stopT);
+  list.addEventListener("contextmenu", e => {
+    const r = e.target.closest(".row"); if (!r) return;
+    e.preventDefault();
+    if (!fired && r.dataset.pid) { fired = true; openSheet(r.dataset.pid); }
+  });
+  list.addEventListener("click", e => {
+    if (fired) { e.stopPropagation(); e.preventDefault(); fired = false; }
+  }, true);
+
+  const _add = window.addMsg;
+  window.addMsg = function(m){
+    const p = peer && prefs.get(peer.id);
+    if (p && p.cleared_at && new Date(m.created_at) <= new Date(p.cleared_at)) return;
+    _add(m);
+  };
+
+  const _open = openChat;
+  window.openChat = async function(u){
+    const p = prefs.get(u.id);
+    if (p && p.hidden) await save(u.id, { hidden: false });
+    return _open(u);
+  };
+
+  const _s = window.start;
+  window.start = async function(u){ await _s(u); await loadPrefs(); listen(); renderList(); };
+  $("out").addEventListener("click", () => {
+    prefs.clear(); showArch = false;
+    if (ch) { sb.removeChannel(ch); ch = null; }
+  });
+})();
+
+/* ====== FRIEND PROFILE (added) ====== */
+(function(){
+  const PUB = SUPABASE_URL + "/storage/v1/object/public/chat-images/";
+  const DEF = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' fill='%239aa3af'/%3E%3Ccircle cx='20' cy='15' r='7' fill='white'/%3E%3Cellipse cx='20' cy='36' rx='13' ry='10' fill='white'/%3E%3C/svg%3E";
+  const css = document.createElement("style");
+  css.textContent = ".pbig{width:120px;height:120px;border-radius:50%;object-fit:cover;background:var(--them);display:block;margin:0 auto 10px;cursor:pointer}#s-prof .pname{text-align:center;font-size:20px;font-weight:700;margin:0 0 4px}#s-prof .pmsg{display:block;margin:12px auto 18px}.pgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}.pgrid img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:6px;cursor:pointer;background:var(--them)}#viewer{position:fixed;inset:0;background:rgba(0,0,0,.92);display:none;align-items:center;justify-content:center;z-index:20}#viewer.on{display:flex}#viewer img{max-width:100%;max-height:100%}.hav,#who{cursor:pointer}";
+  document.head.appendChild(css);
+
+  const scr = document.createElement("div"); scr.id = "s-prof"; scr.className = "screen";
+  scr.innerHTML = '<header><button class="ghost" id="pback">‹ Back</button><h1>Profile</h1></header><div class="pad" id="pbody"></div>';
+  $("app").appendChild(scr);
+
+  const vw = document.createElement("div"); vw.id = "viewer";
+  const vi = document.createElement("img"); vw.appendChild(vi);
+  document.body.appendChild(vw);
+  vw.onclick = () => vw.classList.remove("on");
+  function view(url){ vi.src = url; vw.classList.add("on"); }
+
+  let from = "s-list", cur = null, token = 0;
+
+  async function openProfile(u, src){
+    from = src; cur = u; const my = ++token;
+    const body = $("pbody"); body.textContent = "";
+    const big = new Image(); big.className = "pbig"; big.alt = ""; big.src = DEF;
+    const nm = document.createElement("div"); nm.className = "pname"; nm.textContent = u.username;
+    const mb = document.createElement("button"); mb.className = "pmsg"; mb.textContent = "Message";
+    mb.onclick = () => { if (from === "s-chat") show("s-chat"); else openChat(cur); };
+    const cnt = document.createElement("div"); cnt.className = "note"; cnt.style.margin = "0 0 8px"; cnt.textContent = "Loading…";
+    const grid = document.createElement("div"); grid.className = "pgrid";
+    body.append(big, nm, mb, cnt, grid);
+    big.onclick = () => { if (big.dataset.real) view(big.dataset.real); };
+    show("s-prof");
+    try {
+      const { data: p } = await sb.from("profiles").select("username,avatar_url").eq("id", u.id).maybeSingle();
+      if (my !== token) return;
+      if (p) { nm.textContent = p.username; if (p.avatar_url) { big.src = p.avatar_url; big.dataset.real = p.avatar_url; } }
+      let cleared = null;
+      try {
+        const { data: cp } = await sb.from("chat_prefs").select("cleared_at").eq("user_id", me).eq("peer_id", u.id).maybeSingle();
+        cleared = cp && cp.cleared_at;
+      } catch (e) {}
+      const { data } = await sb.from("messages").select("id,image_url,created_at")
+        .or(`and(sender_id.eq.${me},recipient_id.eq.${u.id}),and(sender_id.eq.${u.id},recipient_id.eq.${me})`)
+        .not("image_url", "is", null).is("deleted_at", null)
+        .order("created_at", { ascending: false }).limit(200);
+      if (my !== token) return;
+      const imgs = (data || []).filter(m => m.image_url && m.image_url.startsWith(PUB) && (!cleared || new Date(m.created_at) > new Date(cleared)));
+      cnt.textContent = imgs.length ? "Shared pictures (" + imgs.length + ")" : "No shared pictures yet.";
+      imgs.forEach(m => {
+        const im = new Image(); im.src = m.image_url; im.alt = "Picture"; im.loading = "lazy";
+        im.onclick = () => view(m.image_url);
+        grid.appendChild(im);
+      });
+    } catch (e) { cnt.textContent = "Could not load."; }
+  }
+
+  $("pback").onclick = () => { token++; show(from); };
+
+  const hav = new Image(); hav.className = "av sm hav"; hav.alt = ""; hav.src = DEF;
+  $("who").parentNode.insertBefore(hav, $("who"));
+  const fromChat = () => { if (peer) openProfile(peer, "s-chat"); };
+  $("who").onclick = fromChat; hav.onclick = fromChat;
+
+  const _open = window.openChat;
+  window.openChat = async function(u){
+    hav.src = DEF;
+    sb.from("profiles").select("avatar_url").eq("id", u.id).maybeSingle()
+      .then(({ data }) => { if (data && data.avatar_url && peer && peer.id === u.id) hav.src = data.avatar_url; })
+      .catch(() => {});
+    return _open(u);
+  };
+
+  const list = $("list");
+  let ts = 0, dur = 0;
+  list.addEventListener("touchstart", () => { ts = Date.now(); }, { passive: true });
+  list.addEventListener("touchend", () => { dur = Date.now() - ts; ts = 0; });
+  list.addEventListener("click", e => {
+    const img = e.target.closest && e.target.closest("img.av");
+    if (!img) return;
+    if (dur > 450) { dur = 0; return; }
+    dur = 0;
+    const row = img.closest(".row"); if (!row) return;
+    const s = row.firstElementChild, name = s.dataset.n || s.textContent;
+    const u = users.find(x => x.id === row.dataset.pid) || users.find(x => x.username === name);
+    if (!u) return;
+    e.stopPropagation(); e.preventDefault();
+    openProfile(u, "s-list");
+  }, true);
+})();
+/* ====== PROFILE REPORT & BLOCK (added) ====== */
+(function(){
+  const css = document.createElement("style");
+  css.textContent = "#rep,#blk{display:none!important}.pact{display:flex;gap:10px;justify-content:center;margin:0 0 18px}.pact button{background:var(--them);color:var(--tx)}.pact button.danger{background:#dc2626;color:#fff}";
+  document.head.appendChild(css);
+
+  const _show = window.show;
+  window.show = function(id){
+    _show(id);
+    if (id !== "s-prof") return;
+    const body = $("pbody"), nm = body.querySelector(".pname"), anchor = body.querySelector(".pmsg");
+    if (!nm || !anchor || body.querySelector(".pact")) return;
+    const u = users.find(x => x.username === nm.textContent);
+    if (!u) return;
+
+    const box = document.createElement("div"); box.className = "pact";
+    const rep = document.createElement("button"); rep.type = "button"; rep.textContent = "Report";
+    const blk = document.createElement("button"); blk.type = "button";
+    const label = () => {
+      const b = blocked.has(u.id);
+      blk.textContent = b ? "Unblock" : "Block";
+      blk.className = b ? "" : "danger";
+    };
+    label();
+
+    rep.onclick = async () => {
+      const why = prompt("Why are you reporting " + u.username + "? (optional)"); if (why === null) return;
+      const { error } = await sb.from("reports").insert({ reporter_id: me, reported_id: u.id, reason: why.slice(0, 500) });
+      alert(error ? "Report failed." : "Report sent. Thank you.");
+    };
+    blk.onclick = async () => {
+      if (blocked.has(u.id)) {
+        await sb.from("blocks").delete().eq("blocker_id", me).eq("blocked_id", u.id);
+        blocked.delete(u.id);
+      } else {
+        if (!confirm("Block " + u.username + "?")) return;
+        await sb.from("blocks").insert({ blocker_id: me, blocked_id: u.id });
+        blocked.add(u.id);
+      }
+      label();
+    };
+
+    box.append(rep, blk);
+    anchor.after(box);
+  };
+})();
+/* ====== SETTINGS (added) ====== */
+(function(){
+  const root = document.documentElement;
+  const DEF = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' fill='%239aa3af'/%3E%3Ccircle cx='20' cy='15' r='7' fill='white'/%3E%3Cellipse cx='20' cy='36' rx='13' ry='10' fill='white'/%3E%3C/svg%3E";
+  const PUB = SUPABASE_URL + "/storage/v1/object/public/chat-images/";
+  const AKEY = "sc_accounts", TKEY = "sc_theme";
+  const ls = {
+    get(k){ try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set(k, v){ try { localStorage.setItem(k, v); } catch (e) {} }
+  };
+  let adding = false, mtoken = 0, bigImg = null;
+
+  const css = document.createElement("style");
+  css.textContent = `
+:root[data-theme=light]{--bg:#f6f7f9;--card:#fff;--tx:#14181f;--mut:#6b7280;--ac:#0f766e;--bd:#e2e5ea;--them:#e8ebf0;color-scheme:light}
+:root[data-theme=dark]{--bg:#0f1318;--card:#181d24;--tx:#eef1f5;--mut:#9aa3af;--ac:#14a89b;--bd:#2a313b;--them:#232a33;color-scheme:dark}
+#out{display:none!important}
+.srow{display:flex;align-items:center;gap:12px;padding:14px 16px;background:var(--card);border-bottom:1px solid var(--bd);cursor:pointer}
+.srow>span:first-child{flex:1}
+.srow.danger{color:#dc2626;font-weight:600}
+.shead{padding:18px 16px 6px;font-size:13px;font-weight:600;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
+.sw{width:48px;height:28px;border-radius:14px;background:var(--bd);position:relative;flex:none;transition:background .2s}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;transition:left .2s}
+.sw.on{background:var(--ac)}.sw.on::after{left:23px}
+#s-me .pname{text-align:center;font-size:20px;font-weight:700;margin:0 0 4px}
+#s-me .pjoin{text-align:center;margin:0 0 12px}
+#s-me .pchg{display:block;margin:0 auto 18px}`;
+  document.head.appendChild(css);
+
+  /* ---- dark mode ---- */
+  const mq = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+  const savedTheme = ls.get(TKEY);
+  if (savedTheme === "dark" || savedTheme === "light") root.setAttribute("data-theme", savedTheme);
+  const isDark = () => { const t = root.getAttribute("data-theme"); return t ? t === "dark" : !!(mq && mq.matches); };
+  function sync(){
+    const on = isDark();
+    document.querySelectorAll("#sbody .sw").forEach(s => { s.classList.toggle("on", on); s.setAttribute("aria-checked", String(on)); });
+  }
+  function setDark(on){ const t = on ? "dark" : "light"; root.setAttribute("data-theme", t); ls.set(TKEY, t); sync(); }
+  if (mq && mq.addEventListener) mq.addEventListener("change", sync);
+
+  /* ---- screens ---- */
+  const set = document.createElement("div"); set.id = "s-set"; set.className = "screen";
+  set.innerHTML = '<header><button class="ghost" id="sback">‹ Back</button><h1>Settings</h1></header><div id="sbody" style="overflow-y:auto;flex:1"></div>';
+  $("app").appendChild(set);
+  const meScr = document.createElement("div"); meScr.id = "s-me"; meScr.className = "screen";
+  meScr.innerHTML = '<header><button class="ghost" id="mback">‹ Back</button><h1>My profile</h1></header><div class="pad" id="mbody"></div>';
+  $("app").appendChild(meScr);
+
+  const gear = document.createElement("button");
+  gear.type = "button"; gear.className = "ghost"; gear.textContent = "⚙️"; gear.style.fontSize = "22px";
+  gear.setAttribute("aria-label", "Settings");
+  $("out").before(gear);
+  gear.onclick = () => { renderSettings(); show("s-set"); };
+  $("sback").onclick = () => show("s-list");
+  $("mback").onclick = () => { mtoken++; renderSettings(); show("s-set"); };
+
+  function row(text, fn, cls, note){
+    const r = document.createElement("div"); r.className = "srow" + (cls ? " " + cls : "");
+    const s = document.createElement("span"); s.textContent = text; r.appendChild(s);
+    if (note) { const n = document.createElement("span"); n.className = "note"; n.textContent = note; r.appendChild(n); }
+    if (fn) r.onclick = fn; else r.style.cursor = "default";
+    return r;
+  }
+  function head(t){ const d = document.createElement("div"); d.className = "shead"; d.textContent = t; return d; }
+
+  /* ---- saved accounts ---- */
+  const getAccs = () => { try { const a = JSON.parse(ls.get(AKEY) || "[]"); return Array.isArray(a) ? a : []; } catch (e) { return []; } };
+  const putAccs = a => ls.set(AKEY, JSON.stringify(a));
+  function upsert(id, name, s){
+    const a = getAccs(), i = a.findIndex(x => x.id === id);
+    const rec = { id, name, at: s.access_token, rt: s.refresh_token };
+    if (i >= 0) a[i] = rec; else a.push(rec);
+    putAccs(a);
+  }
+  const removeAcc = id => putAccs(getAccs().filter(x => x.id !== id));
+  async function snap(){
+    if (!me) return;
+    try {
+      const { data } = await sb.auth.getSession();
+      if (data && data.session && data.session.user.id === me) upsert(me, myName || "me", data.session);
+    } catch (e) {}
+  }
+  if (sb && sb.auth) sb.auth.onAuthStateChange((ev, s) => {
+    if (s && s.user && me && s.user.id === me && ev !== "SIGNED_OUT") upsert(me, myName || "me", s);
+  });
+
+  function resetState(){
+    peer = null; users = []; blocked = new Set(); seen = new Set();
+    $("msgs").textContent = "";
+    const s = $("search"); s.value = ""; s.dispatchEvent(new Event("input"));
+  }
+
+  async function switchTo(id){
+    const acc = getAccs().find(a => a.id === id); if (!acc) return;
+    await snap();
+    const cur = getAccs().find(a => a.id === me);
+    let r;
+    try { r = await sb.auth.setSession({ access_token: acc.at, refresh_token: acc.rt }); } catch (e) { r = { error: e }; }
+    if (!r || r.error || !r.data || !r.data.session) {
+      if (r && r.error && [400, 401, 403].includes(r.error.status)) removeAcc(id);
+      if (cur) { try { await sb.auth.setSession({ access_token: cur.at, refresh_token: cur.rt }); } catch (e) {} }
+      alert("Could not switch. Check your connection, or log in to that account again.");
+      renderAuth(); if (me) renderSettings();
+      return;
+    }
+    resetState();
+    upsert(id, acc.name, r.data.session);
+    await window.start(r.data.session.user);
+  }
+
+  async function addAccount(){
+    if (getAccs().length >= 5) return alert("You can have up to 5 accounts on this device.");
+    await snap();
+    resetState();
+    adding = true;
+    show("s-auth");
+  }
+
+  function renderAuth(){
+    const pad = document.querySelector("#s-auth .pad"); if (!pad) return;
+    const old = $("accbox"); if (old) old.remove();
+    const a = getAccs(); if (!a.length) return;
+    const box = document.createElement("div"); box.id = "accbox"; box.className = "warn";
+    const t = document.createElement("div"); t.className = "note";
+    t.textContent = adding ? "Adding another account: log in or sign up below, or go back to a saved account." : "Saved accounts on this device:";
+    box.appendChild(t);
+    a.forEach(x => {
+      const b = document.createElement("button"); b.type = "button"; b.textContent = "Continue as " + x.name;
+      b.style.cssText = "width:100%;margin-top:8px"; b.onclick = () => switchTo(x.id);
+      box.appendChild(b);
+    });
+    pad.insertBefore(box, pad.firstChild);
+  }
+
+  const _show = window.show;
+  window.show = function(id){ _show(id); if (id === "s-auth") renderAuth(); };
+
+  const _s = window.start;
+  window.start = async function(u){ await _s(u); adding = false; await snap(); };
+  $("out").addEventListener("click", () => { adding = false; if (me) removeAcc(me); });
+
+  /* ---- settings page ---- */
+  function renderSettings(){
+    const b = $("sbody"); b.textContent = "";
+    const pr = document.createElement("div"); pr.className = "srow";
+    const im = new Image(); im.className = "av"; im.alt = ""; im.src = $("myAvatar").src || DEF;
+    const nm = document.createElement("span"); nm.textContent = myName; nm.style.cssText = "flex:1;font-weight:600";
+    const ch = document.createElement("span"); ch.className = "note"; ch.textContent = "View profile ›";
+    pr.append(im, nm, ch); pr.onclick = openMe;
+    b.appendChild(pr);
+
+    b.appendChild(head("Appearance"));
+    const dm = row("Dark mode", () => setDark(!isDark()));
+    const sw = document.createElement("div"); sw.className = "sw"; sw.setAttribute("role", "switch");
+    dm.appendChild(sw); b.appendChild(dm);
+
+    b.appendChild(head("Accounts"));
+    let list = getAccs();
+    if (me && !list.some(a => a.id === me)) list = [{ id: me, name: myName }].concat(list);
+    list.forEach(a => {
+      const cur = a.id === me;
+      b.appendChild(row(a.name, cur ? null : () => switchTo(a.id), "", cur ? "✓ Current" : "Switch ›"));
+    });
+    b.appendChild(row("Add another account", addAccount, "", "+"));
+
+    b.appendChild(head("More"));
+    b.appendChild(row("Share app with friends", shareApp, "", "›"));
+    b.appendChild(row("Log out", () => $("out").click()));
+    b.appendChild(head("Danger zone"));
+    b.appendChild(row("Delete my account", delAccount, "danger"));
+    sync();
+  }
+
+  async function shareApp(){
+    const url = location.href.split("#")[0].split("?")[0].replace(/index\.html$/, "");
+    const text = "Join me on SafeChat, a private chat app. No email or phone needed.";
+    if (navigator.share) {
+      try { await navigator.share({ title: "SafeChat", text, url }); return; }
+      catch (e) { if (e && e.name === "AbortError") return; }
+    }
+    try { await navigator.clipboard.writeText(url); alert("Link copied. Paste it to a friend."); }
+    catch (e) { prompt("Copy this link and send it to a friend:", url); }
+  }
+
+  async function delAccount(){
+    const t = prompt("This permanently deletes your account and all your messages (for everyone), pictures and voice notes. It cannot be undone.\n\nType DELETE to confirm:");
+    if (t === null) return;
+    if (t.trim() !== "DELETE") return alert("Nothing was deleted. You must type DELETE exactly.");
+    const uid = me;
+    const { error } = await sb.rpc("delete_my_account");
+    if (error) return alert("Could not delete your account: " + error.message);
+    for (const bucket of ["avatars", "chat-images", "chat-audio"]) {
+      try {
+        const { data } = await sb.storage.from(bucket).list(uid, { limit: 1000 });
+        const paths = (data || []).filter(f => f.name).map(f => uid + "/" + f.name);
+        if (paths.length) await sb.storage.from(bucket).remove(paths);
+      } catch (e) {}
+    }
+    removeAcc(uid);
+    alert("Your account has been deleted.");
+    $("out").click();
+  }
+
+  /* ---- my profile ---- */
+  function viewImg(url){
+    const vw = $("viewer"), im = vw && vw.querySelector("img");
+    if (!im) return window.open(url, "_blank", "noopener");
+    im.src = url; vw.classList.add("on");
+  }
+  $("myAvatar").addEventListener("load", () => { if (bigImg && bigImg.isConnected) bigImg.src = $("myAvatar").src; });
+
+  async function openMe(){
+    const t = ++mtoken;
+    const body = $("mbody"); body.textContent = "";
+    const big = new Image(); big.className = "pbig"; big.alt = ""; big.src = $("myAvatar").src || DEF;
+    bigImg = big; big.onclick = () => $("avatarInput").click();
+    const nm = document.createElement("div"); nm.className = "pname"; nm.textContent = myName;
+    const jn = document.createElement("div"); jn.className = "note pjoin";
+    const chg = document.createElement("button"); chg.className = "pchg"; chg.textContent = "Change photo";
+    chg.onclick = () => $("avatarInput").click();
+    const cnt = document.createElement("div"); cnt.className = "note"; cnt.style.margin = "0 0 8px"; cnt.textContent = "Loading…";
+    const grid = document.createElement("div"); grid.className = "pgrid";
+    body.append(big, nm, jn, chg, cnt, grid);
+    show("s-me");
+    try {
+      const { data: ss } = await sb.auth.getSession();
+      const cu = ss && ss.session && ss.session.user;
+      if (t === mtoken && cu && cu.created_at) jn.textContent = "Joined " + new Date(cu.created_at).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+      const { data } = await sb.from("messages").select("id,image_url")
+        .eq("sender_id", me).not("image_url", "is", null).is("deleted_at", null)
+        .order("created_at", { ascending: false }).limit(200);
+      if (t !== mtoken) return;
+      const imgs = (data || []).filter(m => m.image_url && m.image_url.startsWith(PUB));
+      cnt.textContent = imgs.length ? "Pictures I've sent (" + imgs.length + ")" : "You haven't sent any pictures yet.";
+      imgs.forEach(m => {
+        const p = new Image(); p.src = m.image_url; p.alt = "Picture"; p.loading = "lazy";
+        p.onclick = () => viewImg(m.image_url);
+        grid.appendChild(p);
+      });
+    } catch (e) { cnt.textContent = "Could not load."; }
+  }
+})();
+
+/* ====== INSTALL APP (added) ====== */
+(function(){
+  if ("serviceWorker" in navigator && location.protocol === "https:") {
+    window.addEventListener("load", () => { navigator.serviceWorker.register("sw.js").catch(() => {}); });
+  }
+
+  const standalone = () => window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const isMobile = isIOS || /Android/.test(navigator.userAgent);
+  let deferred = null;
+
+  const css = document.createElement("style");
+  css.textContent = "#installbox{margin-top:14px;padding:12px 14px;border:1px solid var(--bd);border-radius:12px;background:var(--card);font-size:14px;line-height:1.4}#installbox b{display:block;margin-bottom:4px}#installbox .steps{color:var(--mut)}#installbox button{margin-top:10px;width:100%}";
+  document.head.appendChild(css);
+
+  const box = document.createElement("div"); box.id = "installbox"; box.hidden = true;
+  const title = document.createElement("b"); title.textContent = "Install SafeChat on your phone";
+  const note = document.createElement("div"); note.className = "steps";
+  const btn = document.createElement("button"); btn.type = "button"; btn.textContent = "Install app";
+  box.append(title, note, btn);
+  const anchor = document.querySelector("#s-auth .warn");
+  if (anchor) anchor.after(box);
+
+  function render(){
+    if (standalone() || (!deferred && !isMobile)) { box.hidden = true; return; }
+    if (deferred) {
+      note.textContent = "Add it to your home screen for one-tap access, with no browser bars.";
+      btn.hidden = false;
+    } else if (isIOS) {
+      note.textContent = "Tap the Share button (the square with an arrow) in Safari, then choose “Add to Home Screen”.";
+      btn.hidden = true;
+    } else {
+      note.textContent = "Open your browser menu (⋮) and choose “Install app” or “Add to Home screen”.";
+      btn.hidden = true;
+    }
+    box.hidden = false;
+  }
+
+  window.installApp = async function(){
+    if (deferred) {
+      deferred.prompt();
+      try { await deferred.userChoice; } catch (e) {}
+      deferred = null; render(); return;
+    }
+    alert(isIOS
+      ? "To install: tap the Share button in Safari, then “Add to Home Screen”."
+      : "To install: open your browser menu and choose “Install app” or “Add to Home screen”.");
+  };
+
+  btn.onclick = () => window.installApp();
+  window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); deferred = e; render(); });
+  window.addEventListener("appinstalled", () => { deferred = null; render(); });
+  render();
+})();
+
+/* ====== STATUS & NOTIFICATIONS (added): unread counts, read receipts, typing, online dot, alerts ====== */
+(function(){
+  const ls = {
+    get(k){ try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set(k, v){ try { localStorage.setItem(k, v); } catch (e) {} }
+  };
+  const NK = "sc_notif", OK = "sc_showonline";
+  const unread = new Map(), typing = new Map(), online = new Set(), mstore = new Map(), amap = new Map(), sendChs = new Map(), lastSeen = new Map();
+  let cur = "s-load", presCh = null, typCh = null, rdCh = null, inCh = null, lastSent = 0, toastT = null, mrT = null, hb = null, seenT = null;
+  const pending = new Set();
+  const showOnline = () => ls.get(OK) !== "0";
+  const notifOn = () => ls.get(NK) === "1" && "Notification" in window && Notification.permission === "granted";
+  const chatVisible = id => cur === "s-chat" && peer && peer.id === id && document.visibilityState === "visible";
+
+  const css = document.createElement("style");
+  css.textContent =
+    ".row>span:first-child{position:relative}" +
+    ".od{position:absolute;left:22px;bottom:-1px;width:11px;height:11px;border-radius:50%;background:#22c55e;border:2px solid var(--card);pointer-events:none}" +
+    ".row.unr>span:first-child{font-weight:700}" +
+    ".ubadge{background:var(--ac);color:#fff;font-size:12px;font-weight:700;padding:3px 9px;border-radius:12px;white-space:nowrap}" +
+    ".ttxt{color:var(--ac);font-style:italic;font-size:14px}" +
+    "#rstat{align-self:flex-end;font-size:11px;color:var(--mut);margin:-2px 6px 2px}#rstat.rd{color:var(--ac);font-weight:600}" +
+    "#who small{display:block;font-size:12px;font-weight:400;color:var(--mut);line-height:1.2}#who small.t{color:var(--ac);font-style:italic}#who small i{color:#22c55e;font-style:normal}" +
+    "#toast{position:fixed;left:12px;right:12px;top:calc(env(safe-area-inset-top,0px) + 8px);z-index:80;max-width:496px;margin:0 auto;background:var(--card);color:var(--tx);border:1px solid var(--bd);border-radius:12px;padding:12px 14px;box-shadow:0 6px 24px rgba(0,0,0,.3);cursor:pointer;display:none}#toast.on{display:block}" +
+    ".tg{width:48px;height:28px;border-radius:14px;background:var(--bd);position:relative;flex:none;transition:background .2s}" +
+    ".tg::after{content:\"\";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;transition:left .2s}" +
+    ".tg.on{background:var(--ac)}.tg.on::after{left:23px}";
+  document.head.appendChild(css);
+
+  const toastEl = document.createElement("div"); toastEl.id = "toast"; document.body.appendChild(toastEl);
+  const st = document.createElement("div"); st.id = "rstat";
+
+  /* ---------- helpers ---------- */
+  const total = () => { let n = 0; unread.forEach(v => { n += v; }); return n; };
+  function badge(){
+    const n = total();
+    document.title = n ? "(" + n + ") SafeChat" : "SafeChat";
+    try {
+      if (n && navigator.setAppBadge) navigator.setAppBadge(n).catch(() => {});
+      else if (!n && navigator.clearAppBadge) navigator.clearAppBadge().catch(() => {});
+    } catch (e) {}
+  }
+  function clearTyping(id){ const t = typing.get(id); if (t) clearTimeout(t); typing.delete(id); }
+
+  function paintRows(){
+    document.querySelectorAll("#list .row").forEach(r => {
+      const id = r.dataset.pid; if (!id) return;
+      const nm = r.firstElementChild, sp = r.children[1];
+      const n = unread.get(id) || 0, ty = typing.has(id), on = online.has(id) && showOnline();
+      const dot = nm.querySelector(".od");
+      if (on && !dot) { const d = document.createElement("i"); d.className = "od"; nm.appendChild(d); }
+      else if (!on && dot) dot.remove();
+      r.classList.toggle("unr", n > 0);
+      if (sp) {
+        let cls = "note", txt = "Chat ›";
+        if (ty) { cls = "ttxt"; txt = "typing…"; }
+        else if (n) { cls = "ubadge"; txt = n + " unread message" + (n > 1 ? "s" : ""); }
+        if (sp.className !== cls) sp.className = cls;
+        if (sp.textContent !== txt) sp.textContent = txt;
+      }
+    });
+  }
+
+  function paintHeader(){
+    const w = $("who"); if (!w || !peer) return;
+    let s = w.querySelector("small");
+    if (!s) { s = document.createElement("small"); w.appendChild(s); }
+    const ty = typing.has(peer.id), on = online.has(peer.id) && showOnline();
+    s.className = ty ? "t" : ""; s.textContent = "";
+    if (ty) s.textContent = "typing…";
+    else if (on) { const i = document.createElement("i"); i.textContent = "● "; s.append(i, "online"); }
+    else if (showOnline() && lastSeen.get(peer.id)) s.textContent = "last seen " + fmtSeen(lastSeen.get(peer.id));
+  }
+
+  function fmtSeen(iso){
+    const d = new Date(iso); if (isNaN(d)) return "";
+    const t = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    const now = new Date(), y = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    if (d.toDateString() === now.toDateString()) return "today at " + t;
+    if (d.toDateString() === y.toDateString()) return "yesterday at " + t;
+    return d.toLocaleDateString([], { month: "short", day: "numeric" }) + " at " + t;
+  }
+
+  /* last seen: we report that we're active about once a minute; the server only returns it for
+     people you've chatted with, and only if you also share yours */
+  async function fetchSeen(ids){
+    if (!me || !ids.length) return;
+    try {
+      const { data, error } = await sb.rpc("get_last_seen", { p_ids: ids });
+      if (error || !data) return;
+      ids.forEach(id => lastSeen.delete(id));
+      data.forEach(r => { if (r.last_seen) lastSeen.set(r.id, r.last_seen); });
+      paintHeader();
+    } catch (e) {}
+  }
+  function touch(){
+    if (!me) return;
+    try { sb.rpc("touch_seen", { p_show: showOnline() }).then(() => {}, () => {}); } catch (e) {}
+  }
+  function startHB(){
+    stopHB(); touch();
+    hb = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      touch();
+      if (cur === "s-chat" && peer && !online.has(peer.id)) fetchSeen([peer.id]);
+    }, 60000);
+  }
+  function stopHB(){ if (hb) clearInterval(hb); hb = null; clearTimeout(seenT); }
+
+  function paintStatus(){
+    const box = $("msgs");
+    if (!box || !peer) { st.remove(); return; }
+    const mine = box.querySelectorAll(".m.me"), last = mine[mine.length - 1];
+    if (!last || last.classList.contains("del")) { st.remove(); return; }
+    const m = mstore.get(Number(last.dataset.id));
+    if (!m) { st.remove(); return; }
+    const rd = !!m.read_at, t = rd ? "Read" : "Sent";
+    if (st.textContent !== t) st.textContent = t;
+    st.classList.toggle("rd", rd);
+    if (last.nextSibling !== st) last.after(st);
+  }
+
+  /* The edit/delete layer rewrites a bubble when its row changes (which marking as read does).
+     That would turn a received voice note back into plain text, so put the player back. */
+  function repairAudio(){
+    const box = $("msgs"); if (!box) return;
+    amap.forEach((m, id) => {
+      if (m.sender_id === me) return;
+      const d = box.querySelector('[data-id="' + id + '"]');
+      if (!d || d.querySelector("audio") || d.classList.contains("del")) return;
+      if (d.textContent.trim() !== "[voice note]") return;
+      d.classList.add("aud"); d.textContent = "";
+      const a = document.createElement("audio");
+      a.controls = true; a.preload = "metadata"; a.src = m.audio_url;
+      d.appendChild(a);
+    });
+  }
+  new MutationObserver(() => { repairAudio(); paintStatus(); })
+    .observe($("msgs"), { childList: true, subtree: true, characterData: true });
+
+  /* ---------- read / unread ---------- */
+  function markRead(id){
+    if (!id) return;
+    if (unread.delete(id)) { badge(); renderList(); }
+    pending.add(id); clearTimeout(mrT);
+    mrT = setTimeout(async () => {
+      const ids = Array.from(pending); pending.clear();
+      for (const x of ids) { try { await sb.rpc("mark_read", { p_peer: x }); } catch (e) {} }
+    }, 250);
+  }
+
+  async function loadUnread(){
+    try {
+      const { data, error } = await sb.from("messages").select("sender_id")
+        .eq("recipient_id", me).is("read_at", null).is("deleted_at", null).limit(1000);
+      if (error || !data) return;
+      data.forEach(r => { if (!blocked.has(r.sender_id)) unread.set(r.sender_id, (unread.get(r.sender_id) || 0) + 1); });
+    } catch (e) {}
+  }
+
+  /* ---------- alerts ---------- */
+  function toast(name, id){
+    toastEl.textContent = name + " sent you a message";
+    toastEl.onclick = () => { toastEl.classList.remove("on"); const u = users.find(x => x.id === id); if (u) openChat(u); };
+    toastEl.classList.add("on");
+    clearTimeout(toastT); toastT = setTimeout(() => toastEl.classList.remove("on"), 4000);
+  }
+  function alertUser(m){
+    if (!notifOn()) return;
+    const u = users.find(x => x.id === m.sender_id), name = u ? u.username : "SafeChat";
+    if (document.visibilityState === "visible") {
+      toast(name, m.sender_id);
+      try { if (navigator.vibrate) navigator.vibrate(30); } catch (e) {}
+      return;
+    }
+    const opts = { body: "New message", tag: "msg-" + m.sender_id, icon: "apple-touch-icon.png" };
+    if (navigator.serviceWorker && navigator.serviceWorker.getRegistration) {
+      navigator.serviceWorker.getRegistration().then(r => {
+        if (r) r.showNotification(name, opts); else new Notification(name, opts);
+      }).catch(() => {});
+    } else { try { new Notification(name, opts); } catch (e) {} }
+  }
+
+  /* ---------- realtime ---------- */
+  function stopAll(){
+    [presCh, typCh, rdCh, inCh].forEach(c => { if (c) sb.removeChannel(c); });
+    presCh = typCh = rdCh = inCh = null;
+    sendChs.forEach(c => sb.removeChannel(c)); sendChs.clear();
+    stopHB();
+  }
+  function resetState(){
+    unread.clear(); online.clear(); mstore.clear(); amap.clear(); pending.clear(); lastSeen.clear();
+    typing.forEach(t => clearTimeout(t)); typing.clear();
+  }
+
+  function startRealtime(){
+    inCh = sb.channel("alerts").on("postgres_changes",
+      { event: "INSERT", schema: "public", table: "messages", filter: "recipient_id=eq." + me },
+      p => {
+        const m = p.new; if (!m || blocked.has(m.sender_id)) return;
+        clearTyping(m.sender_id);
+        if (chatVisible(m.sender_id)) { markRead(m.sender_id); return; }
+        unread.set(m.sender_id, (unread.get(m.sender_id) || 0) + 1);
+        badge(); renderList(); alertUser(m);
+      }).subscribe();
+
+    rdCh = sb.channel("receipts").on("postgres_changes",
+      { event: "UPDATE", schema: "public", table: "messages", filter: "sender_id=eq." + me },
+      p => {
+        const m = p.new; if (!m) return;
+        mstore.set(m.id, Object.assign({}, mstore.get(m.id) || {}, m));
+        if (peer && m.recipient_id === peer.id) paintStatus();
+      }).subscribe();
+
+    typCh = sb.channel("typing:" + me).on("broadcast", { event: "typing" }, ({ payload }) => {
+      const id = payload && payload.from;
+      if (!id || id === me || blocked.has(id)) return;
+      clearTyping(id);
+      typing.set(id, setTimeout(() => { typing.delete(id); paintRows(); paintHeader(); }, 3500));
+      paintRows(); paintHeader();
+    }).on("broadcast", { event: "chat_deleted" }, ({ payload }) => {
+      const id = payload && payload.from;
+      if (id && id !== me) wipeLocal(id);
+    }).subscribe();
+
+    presCh = sb.channel("online", { config: { presence: { key: me } } });
+    presCh.on("presence", { event: "sync" }, () => {
+      online.clear();
+      Object.keys(presCh.presenceState()).forEach(k => { if (k !== me) online.add(k); });
+      paintRows(); paintHeader();
+      if (peer && !online.has(peer.id)) { clearTimeout(seenT); seenT = setTimeout(() => fetchSeen([peer.id]), 1500); }
+    });
+    presCh.subscribe(async s => {
+      if (s === "SUBSCRIBED" && showOnline()) { try { await presCh.track({ t: Date.now() }); } catch (e) {} }
+    });
+  }
+
+  /* ---------- hooks into the existing app ---------- */
+  const _rl = window.renderList;
+  window.renderList = function(){
+    _rl();
+    const box = $("list");
+    const rows = Array.from(box.querySelectorAll(".row"));
+    const ups = rows.filter(r => r.dataset.pid && unread.get(r.dataset.pid) && r.style.display !== "none");
+    const ref = rows.find(r => !ups.includes(r));
+    if (ref) ups.forEach(r => box.insertBefore(r, ref));
+    paintRows();
+  };
+
+  const _sh = window.show;
+  window.show = function(id){
+    cur = id; _sh(id);
+    if (id === "s-chat" && peer) { paintHeader(); markRead(peer.id); }
+    if (id === "s-list") paintRows();
+    if (id === "s-set") injectSettings();
+  };
+
+  const _am = window.addMsg;
+  window.addMsg = function(m){
+    _am(m);
+    mstore.set(m.id, m);
+    if (m.audio_url && !m.deleted_at) amap.set(m.id, m);
+    if (m.sender_id === me) paintStatus();
+    else if (peer && m.sender_id === peer.id) {
+      if (typing.has(peer.id)) { clearTyping(peer.id); paintHeader(); }
+      if (!m.read_at && chatVisible(peer.id)) markRead(peer.id);
+    }
+  };
+
+  const _oc = window.openChat;
+  window.openChat = async function(u){
+    sendChs.forEach((c, k) => { if (k !== u.id) { sb.removeChannel(c); sendChs.delete(k); } });
+    if (!sendChs.has(u.id)) { const c = sb.channel("typing:" + u.id); c.subscribe(); sendChs.set(u.id, c); }
+    await _oc(u);
+    if (peer && peer.id === u.id) { paintHeader(); markRead(u.id); paintStatus(); fetchSeen([u.id]); }
+  };
+
+  const _st = window.start;
+  window.start = async function(u){
+    stopAll(); resetState(); badge();
+    await _st(u);
+    await loadUnread();
+    badge(); renderList();
+    startRealtime();
+    startHB();
+  };
+
+  $("txt").addEventListener("input", () => {
+    if (!peer || !me || blocked.has(peer.id) || !$("txt").value.trim()) return;
+    const now = Date.now(); if (now - lastSent < 2500) return;
+    lastSent = now;
+    const c = sendChs.get(peer.id);
+    if (c) { try { c.send({ type: "broadcast", event: "typing", payload: { from: me } }); } catch (e) {} }
+  });
+
+  window.addEventListener("pagehide", touch);
+  document.addEventListener("visibilitychange", () => {
+    if (!me) return;
+    touch();
+    if (document.visibilityState !== "visible") return;
+    if (cur === "s-chat" && peer) markRead(peer.id);
+    if (presCh && showOnline()) { try { presCh.track({ t: Date.now() }).catch(() => {}); } catch (e) {} }
+  });
+
+  $("out").addEventListener("click", () => {
+    stopAll(); resetState(); badge(); toastEl.classList.remove("on");
+  });
+
+  /* ---------- settings: notifications + online status ---------- */
+  async function toggleNotif(){
+    if (ls.get(NK) === "1") { ls.set(NK, "0"); return; }
+    if (!("Notification" in window)) {
+      alert("On iPhone, notifications work once SafeChat is added to your Home Screen (Share → Add to Home Screen) and opened from there.");
+      return;
+    }
+    let p = Notification.permission;
+    if (p === "default") { try { p = await Notification.requestPermission(); } catch (e) {} }
+    if (p !== "granted") { alert("Notifications are blocked for SafeChat. Turn them on in your phone's Settings, then try again."); return; }
+    ls.set(NK, "1");
+  }
+  async function toggleOnline(){
+    const on = !showOnline(); ls.set(OK, on ? "1" : "0");
+    if (presCh) { try { if (on) await presCh.track({ t: Date.now() }); else await presCh.untrack(); } catch (e) {} }
+    touch(); paintRows(); paintHeader();
+  }
+
+  function mkRow(text, getOn, fn){
+    const r = document.createElement("div"); r.className = "srow"; r.dataset.n = "1";
+    const s = document.createElement("span"); s.textContent = text; r.appendChild(s);
+    const t = document.createElement("div"); t.className = "tg" + (getOn() ? " on" : "");
+    t.setAttribute("role", "switch"); t.setAttribute("aria-checked", String(getOn())); r.appendChild(t);
+    r.onclick = async () => {
+      await fn();
+      const on = getOn(); t.classList.toggle("on", on); t.setAttribute("aria-checked", String(on));
+    };
+    return r;
+  }
+  function injectSettings(){
+    const b = $("sbody"); if (!b || b.querySelector("[data-n]")) return;
+    const anchor = Array.from(b.querySelectorAll(".shead")).find(h => h.textContent === "Accounts");
+    const h = document.createElement("div"); h.className = "shead"; h.dataset.n = "1"; h.textContent = "Alerts & privacy";
+    const items = [h, mkRow("Notifications", notifOn, toggleNotif), mkRow("Show when I’m online", showOnline, toggleOnline)];
+    items.forEach(el => { if (anchor) b.insertBefore(el, anchor); else b.appendChild(el); });
+  }
+
+  /* ---------- delete chat for EVERYONE ---------- */
+  function wipeLocal(id){
+    clearTyping(id);
+    if (unread.delete(id)) badge();
+    if (peer && peer.id === id) { $("msgs").textContent = ""; seen = new Set(); st.remove(); }
+    renderList();
+  }
+  function notifyDeleted(id){
+    const msg = { type: "broadcast", event: "chat_deleted", payload: { from: me } };
+    const c = sendChs.get(id);
+    if (c) { try { c.send(msg); } catch (e) {} return; }
+    const t = sb.channel("typing:" + id);
+    t.subscribe(s => {
+      if (s === "SUBSCRIBED") { try { t.send(msg); } catch (e) {} setTimeout(() => sb.removeChannel(t), 2000); }
+    });
+  }
+  async function deleteEverywhere(u){
+    try {
+      const { data: mine } = await sb.from("messages").select("image_url,audio_url")
+        .eq("sender_id", me).eq("recipient_id", u.id).limit(2000);
+      const { error } = await sb.rpc("delete_chat", { p_peer: u.id });
+      if (error) { alert("Could not delete the chat: " + error.message); return false; }
+      const base = SUPABASE_URL + "/storage/v1/object/public/", groups = { "chat-images": [], "chat-audio": [] };
+      (mine || []).forEach(m => {
+        [["chat-images", m.image_url], ["chat-audio", m.audio_url]].forEach(([bk, url]) => {
+          if (url && url.startsWith(base + bk + "/")) groups[bk].push(url.slice((base + bk + "/").length));
+        });
+      });
+      for (const bk in groups) {
+        const arr = groups[bk];
+        for (let i = 0; i < arr.length; i += 100) { try { await sb.storage.from(bk).remove(arr.slice(i, i + 100)); } catch (e) {} }
+      }
+      notifyDeleted(u.id);
+      wipeLocal(u.id);
+      return true;
+    } catch (e) { alert("Could not delete the chat. Check your connection and try again."); return false; }
+  }
+
+  const csheet = $("csheet");
+  if (csheet) {
+    let openedAt = 0, bypass = false;
+    new MutationObserver(() => { if (csheet.classList.contains("on")) openedAt = Date.now(); })
+      .observe(csheet, { attributes: true, attributeFilter: ["class"] });
+    csheet.addEventListener("click", async e => {
+      const b = e.target.closest && e.target.closest("button.danger");
+      if (!b || bypass || b.textContent.trim() !== "Delete chat") return;
+      e.stopImmediatePropagation(); e.preventDefault();
+      if (Date.now() - openedAt < 500) return;
+      const nm = csheet.querySelector("p"), u = nm && users.find(x => x.username === nm.textContent);
+      if (!u) return;
+      if (!confirm("Delete this chat for EVERYONE?\n\nAll messages, pictures and voice notes between you and " + u.username + " will be permanently erased for both of you. This cannot be undone.")) return;
+      b.disabled = true;
+      const ok = await deleteEverywhere(u);
+      b.disabled = false;
+      if (!ok) return;
+      /* now let the app hide the chat from your list the way it already does */
+      bypass = true; const oc = window.confirm; window.confirm = () => true;
+      try { b.click(); } finally { window.confirm = oc; bypass = false; }
+    }, true);
+  }
+})();
+
+</script>
+</body>
+</html>
